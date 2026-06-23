@@ -1,0 +1,5 @@
+- All USBs should be detected upon entry
+- USBs should be uniquely identified and automatically disconnected if not whitelisted
+- USBs hold full transaction history encrypted on them - only the "owners" can access this history
+- Whitelist can be written in a pseudoenglish style and parsed like a programming language
+- CLI
