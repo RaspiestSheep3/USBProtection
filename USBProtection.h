@@ -6,3 +6,7 @@
 #include <iostream>
 
 // TODO: Reference additional headers your program requires here.
+#include <windows.h>
+#include <dbt.h>
+#include <initguid.h>
+#include <usbiodef.h> // Contains GUID_DEVINTERFACE_USB_DEVICE
