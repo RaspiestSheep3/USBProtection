@@ -10,3 +10,5 @@
 #include <dbt.h>
 #include <initguid.h>
 #include <usbiodef.h> // Contains GUID_DEVINTERFACE_USB_DEVICE
+#include <string>
+#include <fstream>

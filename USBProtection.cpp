@@ -5,6 +5,70 @@
 
 using namespace std;
 
+void DBCCParser(uint64_t* bufferInt, string* bufferStr, string dbcc) {
+    string VID = dbcc.substr(12, 4);
+    string PID = dbcc.substr(21, 4);
+    string serial = dbcc.substr(26, 16);
+
+    bufferStr[0] = VID;
+    bufferStr[1] = PID;
+    bufferStr[2] = serial;
+
+    cout << "VID : " << VID << "\nPID : " << PID << "\nSerial : " << serial << endl;
+
+    bufferInt[0] = stoull(VID, 0, 16);
+    bufferInt[1] = stoull(PID, 0, 16);
+    bufferInt[2] = stoull(serial, 0, 16);
+}
+
+void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev) {
+    cout << "DBCC NAME : " << dev->dbcc_name << endl;
+    uint64_t bufferInt[3] = { 0 };
+    string bufferStr[3];
+    DBCCParser(bufferInt, bufferStr, dev->dbcc_name);
+
+    //Known systems storage
+    //TODO - encrypt this
+    ofstream fCreate("KnownCombinations.txt", ios_base::app);
+    fCreate.close();
+    
+    ifstream fIn;
+    fIn.open("KnownCombinations.txt");
+    string fileBuffer;
+    string name = "";
+
+    while (getline(fIn, fileBuffer)) {
+        if (
+                (fileBuffer.substr(0, 04) == bufferStr[0])
+            &&  (fileBuffer.substr(4, 04) == bufferStr[1])
+            &&  (fileBuffer.substr(8, 16) == bufferStr[2])
+            ){
+            //We know this device already
+            name = fileBuffer.substr(24, string::npos);
+
+            cout << "Name : " << name << endl;
+            break;
+        }
+    }
+
+    fIn.close();
+
+    if (name == "") {
+        ofstream fOut("KnownCombinations.txt");
+
+        cout << "New USB. Name : ";
+        cin >> name;
+        cout << endl;
+
+        string out = bufferStr[0] + bufferStr[1] + bufferStr[2] + name + "\n";
+        cout << "Out : " << out;
+        fOut << out;
+
+        fOut.close();
+    }
+
+}
+
 //Windows stuff
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //I think this triggers when a windows thing occurs
     if (msg == WM_DEVICECHANGE) {
@@ -16,10 +80,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
             if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) { //DBT describes plug-and-play stuff
                 std::cout << "(USB Interface Detected)\n";
 
-                PDEV_BROADCAST_DEVICEINTERFACE dev = //This is a pointer
-                    reinterpret_cast<PDEV_BROADCAST_DEVICEINTERFACE>(lParam); //We treat the integer lParam as a pointer to DEV...
+                auto dev = ((DEV_BROADCAST_DEVICEINTERFACE*)lpHdr);
 
-                cout << "DBCC NAME : " << dev->dbcc_name << endl;
+                HandleUSB(dev);
             }
             else {
                 std::cout << "\n";
