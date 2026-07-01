@@ -12,3 +12,4 @@
 #include <usbiodef.h> // Contains GUID_DEVINTERFACE_USB_DEVICE
 #include <string>
 #include <fstream>
+#include <algorithm>
