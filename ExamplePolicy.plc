@@ -2,30 +2,33 @@ IF [ ~OWNER~ = #TEST1# ] {
     IF[ ~FRIENDLY_NAME~ = #MyUSB# ] {
         :ALLOW:
     }
-    ELSE {
+    EL {
         IF [ ~SYSTEM_MODE~ = #1# ] {
             :REQUEST:
         }
-        ELSE {
+        EL {
             :DENY:
         }
     }
 }
-
-IF [ ~KNOWN~ = #true# ] {
-    IF [ ~TIME~ < #200000#] {
-        :ACCEPT:
+EL {
+    IF [ ~KNOWN~ = #true# ] {
+        IF [ ~TIME~ < #200000#] {
+            :ACCEPT:
+        }
+        EL {
+            :DENY:
+        }
     }
-    ELSE {
-        :DENY:
+    EL {
+        IF [ ~VID~ = #1234#] {
+            :REQUEST:
+        }
+
+        EL {
+            IF[ ~PID~ = #1234# ] {
+                :ACCEPT:
+            }
+        }
     }
 }
-
-IF [ ~VID~ = #1234#] {
-    :REQUEST:
-}
-
-IF[ ~PID~ = #1234# ] {
-    :ALLOW:
-}
-

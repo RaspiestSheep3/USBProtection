@@ -72,6 +72,127 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev) {
 
 }
 
+struct Condition {
+    uint8_t type = 0;
+    /*
+    0 - Invalid
+    1 - Owner
+    2 - Time
+    3 - Known
+    4 - Friendly Name
+    5 - VID
+    6 - PID
+    7 - System Mode
+    */
+    string RHS = "";
+};
+
+struct ASTNode {
+    Condition* condition = NULL; //If NULL, assume naturally true - this is for ALLOW / DENY stuff
+    ASTNode* ifBlock = NULL; //If the end of the chain, NULL
+    ASTNode* elseBlock = NULL; //NULL if not an IF thing
+    uint8_t allowCode = 0; 
+    /*
+        0 - Invalid
+        1 - ALLOW
+        2 - REQUEST
+        3 - DENY
+    */
+};
+
+string GenerateSubstr(string str, char start, char end) {
+    string out = "";
+    for (int i = str.find(start) + 1; i < str.length(); i++) {
+        if (str[i] == end) break;
+        out += str[i];
+    }
+
+    return out;
+}
+
+void FormASTTreeLayer(ASTNode* node, vector<string> scope, bool isIf) {
+    cout << "============" << endl;
+    cout << "Forming AST Layer" << endl;
+
+    cout << "Scope : " << endl;
+    for (string line : scope) cout << line << endl;
+    
+    /*We can say a scope has either an IF / ELSE setup or not
+    If it does, we need to consider the IF/ELSE pair together
+    If it doesnt, its a simple ALLOW/REQUEST/DENY node*/
+    if (scope[0].substr(0,2) == "IF") {
+        //In this case we are dealing with an IF,ELSE clause
+        string conditionStr = GenerateSubstr(scope[0], '[', ']');
+        string conditionTypeStr = GenerateSubstr(conditionStr, '~', '~');
+        uint8_t conditionType = 0;
+        
+        if (conditionTypeStr == "OWNER") conditionType = 1;
+        else if (conditionTypeStr == "TIME") conditionType = 2;
+        else if (conditionTypeStr == "KNOWN") conditionType = 3;
+        else if (conditionTypeStr == "FRIENDLY_NAME") conditionType = 4;
+        else if (conditionTypeStr == "VID") conditionType = 5;
+        else if (conditionTypeStr == "PID") conditionType = 6;
+        else if (conditionTypeStr == "SYSTEM_MODE") conditionType = 7;
+
+        Condition condition = Condition{
+            conditionType,
+            GenerateSubstr(conditionStr, '#', '#')
+        };
+
+        node->condition = &condition;
+
+        //Counting out the IF scope using depths
+        uint64_t scopeDepth = 1;
+        vector<string> ifScope = {};
+        uint64_t ifBlockEnd = 1;
+        for (int i = 1; i < scope.size(); i++) {
+            if (scope[i].find('{') != string::npos) scopeDepth++;
+            else if (scope[i].find('}') != string::npos) scopeDepth--;
+            if (scopeDepth == 0) break;
+            ifScope.push_back(scope[i]);
+
+            cout << "IF Scope Section : " << scope[i] << endl;
+            ifBlockEnd++;
+        }
+
+        ASTNode ifChild;
+        FormASTTreeLayer(&ifChild, ifScope, true);
+        node->ifBlock = &ifChild;
+
+        cout << "IF Block end " << ifBlockEnd << endl;
+
+        //EL will not always exist - we first need to work out if it exists 
+        if ((scope.size() > ifBlockEnd + 1) && (scope[ifBlockEnd + 1].substr(0, 2) == "EL")) {
+            //Counting out the EL scope using depths
+            scopeDepth = 1;
+            vector<string> elScope = {};
+            for (int i = ifBlockEnd + 2; i < scope.size(); i++) {
+                if (scope[i].find('{') != string::npos) scopeDepth++;
+                else if (scope[i].find('}') != string::npos) scopeDepth--;
+                if (scopeDepth == 0) break;
+                elScope.push_back(scope[i]);
+
+                cout << "EL Scope Section : " << scope[i] << endl;
+            }
+
+            ASTNode elChild;
+            FormASTTreeLayer(&elChild, elScope, false);
+            node->elseBlock = &elChild;
+        }
+    }
+    else {
+        //In this case we are dealing with an ALLOW/REQUETS/DENY sitauton
+        ASTNode child;
+        if (scope[0] == ":ALLOW:") child.allowCode = 1;
+        else if (scope[0] == ":REQUEST:") child.allowCode = 2;
+        else child.allowCode = 3;
+        if (isIf) node->ifBlock = &child;
+        else node->elseBlock = &child;
+    }
+
+    cout << "-------" << endl;
+}
+
 bool DoesUSBMatchPolicy() {
     /*
         - Policy parameters
@@ -81,7 +202,7 @@ bool DoesUSBMatchPolicy() {
             - Friendly Name ex
             - VID
             - PID
-            - System mode ex
+            - System Mode ex
         - Outs
             - Allow
             - Block
@@ -94,20 +215,50 @@ bool DoesUSBMatchPolicy() {
     ifstream f(policyPath);
     string policy;
     string buffer;
-    while (getline(f, buffer)) { policy += buffer; }
+    while (getline(f, buffer)) { policy += (buffer + "\n"); }
     f.close();
 
     //Cleaning up the policy
     size_t pos = policy.find("    ");
     string replace = "    ";
-    string replacer = " ";
+    string replacer = "";
     while (pos != string::npos) {
         policy.replace(pos, replace.size(), replacer);
         pos = policy.find(replace, pos + replacer.size());
     }
 
-    //!TEMP
-    cout << "Policy : " << policy << endl;
+    vector<string> policyVector = {};
+
+    buffer = "";
+    for (int i = 0; i < policy.length(); i++) {
+        if (policy[i] == '\n') {
+            if (buffer != "\n" && buffer != "") policyVector.push_back(buffer); //IF statement removes blank lines to keep things llean
+            buffer = "";
+        }
+        else buffer += policy[i];
+    }
+
+    //Forming the AST
+    vector<ASTNode*> rootNodes = {};
+
+    //We can start with the first line
+    /*
+    ASTNode nodeA;
+    vector<string> subVector = {};
+    
+    uint64_t scopeLayer = 0;
+    for (string line : policyVector) {
+        subVector.push_back(line);
+        if (line.find("{") != string::npos) scopeLayer++;
+        else { if (line.find("}") != string::npos) scopeLayer--; }
+            
+        if (scopeLayer == 0) break;
+    }
+    */
+
+    ASTNode nodeA;
+    FormASTTreeLayer(&nodeA, policyVector, true);
+    rootNodes.push_back(&nodeA);
 
     return out;
 }
