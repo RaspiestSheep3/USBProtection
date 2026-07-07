@@ -5,8 +5,61 @@
 
 using namespace std;
 
+//Structures
+struct Condition {
+    uint8_t type = 0;
+    /*
+    0 - Invalid
+    1 - Owner
+    2 - Time
+    3 - Known
+    4 - VID
+    5 - PID
+    6 - System Mode
+    7 - Custom Name
+    */
+    string RHS = "";
+    char sign = '=';
+};
+
+struct ASTNode {
+    Condition* condition = NULL; //If NULL, assume naturally true - this is for ALLOW / DENY stuff
+    ASTNode* ifBlock = NULL; //If the end of the chain, NULL
+    ASTNode* elseBlock = NULL; //NULL if not an IF thing
+    uint8_t allowCode = 0;
+    /*
+        0 - Invalid
+        1 - ALLOW
+        2 - REQUEST
+        3 - DENY
+    */
+};
+
+struct USBStatus {
+    //This is not strictly required but keeps things neater IMO
+    string owner = "";
+    bool known = false;
+    string VID = "";
+    string PID = "";
+    uint8_t systemMode;
+    string customName = "";
+};
+
 //System settings
 string policyPath;
+uint8_t systemMode;
+ASTNode root;
+
+//Helpers
+string GenerateSubstr(string str, char start, char end) {
+    string out = "";
+    for (int i = str.find(start) + 1; i < str.length(); i++) {
+        if (str[i] == end) break;
+        out += str[i];
+    }
+
+    return out;
+}
 
 void DBCCParser(uint64_t* bufferInt, string* bufferStr, string dbcc) {
     string VID = dbcc.substr(12, 4);
@@ -24,94 +77,7 @@ void DBCCParser(uint64_t* bufferInt, string* bufferStr, string dbcc) {
     bufferInt[2] = stoull(serial, 0, 16);
 }
 
-void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev) {
-    cout << "DBCC NAME : " << dev->dbcc_name << endl;
-    uint64_t bufferInt[3] = { 0 };
-    string bufferStr[3];
-    DBCCParser(bufferInt, bufferStr, dev->dbcc_name);
-
-    //Known systems storage
-    //TODO - encrypt this
-    fstream f;
-    f.open("KnownCombinations.txt");
-    string fileBuffer;
-    string name = "";
-
-    while (getline(f, fileBuffer)) {
-        if (
-                (fileBuffer.substr(0, 04) == bufferStr[0])
-            &&  (fileBuffer.substr(4, 04) == bufferStr[1])
-            &&  (fileBuffer.substr(8, 16) == bufferStr[2])
-            ){
-            //We know this device already
-            name = fileBuffer.substr(24, string::npos);
-
-            cout << "Name : " << name << endl;
-            break;
-        }
-    }
-
-    if (name == "") {
-
-        cout << "New USB. Name : ";
-        cin >> name;
-        cout << endl;
-
-        string out = bufferStr[0] + bufferStr[1] + bufferStr[2] + name + "\n";
-        cout << "Out : " << out;
-        f << out;
-    }
-
-    f.close();
-
-}
-
-struct Condition {
-    uint8_t type = 0;
-    /*
-    0 - Invalid
-    1 - Owner
-    2 - Time
-    3 - Known
-    4 - VID
-    5 - PID
-    6 - System Mode
-    */
-    string RHS = "";
-    char sign = '=';
-};
-
-struct ASTNode {
-    Condition* condition = NULL; //If NULL, assume naturally true - this is for ALLOW / DENY stuff
-    ASTNode* ifBlock = NULL; //If the end of the chain, NULL
-    ASTNode* elseBlock = NULL; //NULL if not an IF thing
-    uint8_t allowCode = 0; 
-    /*
-        0 - Invalid
-        1 - ALLOW
-        2 - REQUEST
-        3 - DENY
-    */
-};
-
-struct USBStatus {
-    //This is not strictly required but keeps things neater IMO
-    string owner = "";
-    bool known = false;
-    string VID = "";
-    string PID = "";
-    uint8_t systemMode;
-};
-
-string GenerateSubstr(string str, char start, char end) {
-    string out = "";
-    for (int i = str.find(start) + 1; i < str.length(); i++) {
-        if (str[i] == end) break;
-        out += str[i];
-    }
-
-    return out;
-}
+//functions
 
 void FormASTTreeLayer(ASTNode* node, vector<string> scope) {
     cout << "============" << endl;
@@ -141,6 +107,7 @@ void FormASTTreeLayer(ASTNode* node, vector<string> scope) {
         else if (conditionTypeStr == "VID") conditionType = 4;
         else if (conditionTypeStr == "PID") conditionType = 5;
         else if (conditionTypeStr == "SYSTEM_MODE") conditionType = 6;
+        else if (conditionTypeStr == "CUSTOM_NAME") conditionType = 7;
 
         node->condition = new Condition{
             conditionType,
@@ -241,6 +208,12 @@ bool CheckCondition(Condition* condition, USBStatus* status) {
         //System Mode
         return (to_string(status->systemMode) == condition->RHS);
     }
+    else if (condition->type == 7) {
+        //Custom name
+        return (status->customName == condition->RHS);
+    }
+
+    return false; //Backup failure condition
 }
 
 uint8_t NodePolicyCheck(USBStatus* status, ASTNode* node) {
@@ -269,7 +242,7 @@ uint8_t NodePolicyCheck(USBStatus* status, ASTNode* node) {
     return out;
 }
 
-uint8_t DoesUSBMatchPolicy() {
+uint8_t DoesUSBMatchPolicy(USBStatus* status, ASTNode* rootNode) {
     /*
         - Policy parameters
             - Owner ex
@@ -286,56 +259,72 @@ uint8_t DoesUSBMatchPolicy() {
     */
     uint8_t out = 0;
 
-    //Loading in the policy path data
-    ifstream f(policyPath);
-    string policy;
-    string buffer;
-    while (getline(f, buffer)) { policy += (buffer + "\n"); }
-    f.close();
-
-    //Cleaning up the policy
-    size_t pos = policy.find("    ");
-    string replace = "    ";
-    string replacer = "";
-    while (pos != string::npos) {
-        policy.replace(pos, replace.size(), replacer);
-        pos = policy.find(replace, pos + replacer.size());
-    }
-
-    cout << "Policy : " << policy << endl;
-
-    vector<string> policyVector = {};
-
-    buffer = "";
-    for (int i = 0; i < policy.length(); i++) {
-        if (policy[i] == '\n') {
-            if (buffer != "\n" && buffer != "") policyVector.push_back(buffer); //IF statement removes blank lines to keep things llean
-            buffer = "";
-        }
-        else buffer += policy[i];
-    }
-
-    //Forming the AST
-    ASTNode nodeA;
-    FormASTTreeLayer(&nodeA, policyVector);
-
     cout << "Step 1 complete" << endl;
 
-    //!TEMPORARY - TO FIX
-    USBStatus testStatus = {
-        "TestOwner1",
-        true,
-        "1234",
-        "1234",
-        1
-    };
-
-    out = NodePolicyCheck(&testStatus, &nodeA);
+    out = NodePolicyCheck(status, rootNode);
     if (out == 0) out = 3; //Safest to deny unless states otehrwise
     cout << "Policy Check results : " << to_string(out) << endl;
 
     return out;
 }
+
+void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev) {
+    cout << "DBCC NAME : " << dev->dbcc_name << endl;
+    uint64_t bufferInt[3] = { 0 };
+    string bufferStr[3];
+    DBCCParser(bufferInt, bufferStr, dev->dbcc_name);
+
+    string VID = bufferStr[0];
+    string PID = bufferStr[1];
+    string serial = bufferStr[2];
+
+    //Known systems storage
+    //TODO - encrypt this
+    fstream f;
+    f.open("KnownCombinations.txt");
+    string fileBuffer;
+    string name = "";
+
+    while (getline(f, fileBuffer)) {
+        if (
+            (fileBuffer.substr(0, 04) == VID)
+            && (fileBuffer.substr(4, 04) == PID)
+            && (fileBuffer.substr(8, 16) == serial)
+            ) {
+            //We know this device already
+            name = fileBuffer.substr(24, string::npos);
+
+            cout << "Name : " << name << endl;
+            break;
+        }
+    }
+
+    if (name == "") {
+
+        cout << "New USB. Name : ";
+        cin >> name;
+        cout << endl;
+
+        string out = VID + PID + serial + name + "\n";
+        cout << "Out : " << out;
+        f << out;
+    }
+
+    f.close();
+
+    //We need to work out how to mesh this with the above code for learning new devices
+    USBStatus usbStatus = {
+        "TestOwner1", //TO UPDATE
+        name != "",
+        VID,
+        PID,
+        systemMode,
+        name,
+    };
+
+    DoesUSBMatchPolicy(&usbStatus, &root);
+}
+
 
 //Windows stuff
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //I think this triggers when a windows thing occurs
@@ -374,8 +363,47 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
 int main() {
     cout << "Policy Path : ";
     cin >> policyPath;
+    cout << endl;
 
-    DoesUSBMatchPolicy();
+    string inputBuffer;
+    cout << "System Policy Mode : ";
+    cin >> inputBuffer;
+    cout << endl;
+    systemMode = stoi(inputBuffer);
+
+    //Writing the policy
+    
+    //Loading in the policy path data
+    ifstream f(policyPath);
+    string policy;
+    string buffer;
+    while (getline(f, buffer)) { policy += (buffer + "\n"); }
+    f.close();
+
+    //Cleaning up the policy
+    size_t pos = policy.find("    ");
+    string replace = "    ";
+    string replacer = "";
+    while (pos != string::npos) {
+        policy.replace(pos, replace.size(), replacer);
+        pos = policy.find(replace, pos + replacer.size());
+    }
+
+    cout << "Policy : " << policy << endl;
+
+    vector<string> policyVector = {};
+
+    buffer = "";
+    for (int i = 0; i < policy.length(); i++) {
+        if (policy[i] == '\n') {
+            if (buffer != "\n" && buffer != "") policyVector.push_back(buffer); //IF statement removes blank lines to keep things llean
+            buffer = "";
+        }
+        else buffer += policy[i];
+    }
+    
+    //Forming the AST
+    FormASTTreeLayer(&root, policyVector);
 
     cout << "Listening for USB plugin events... Press Ctrl+C to exit.\n\n";
 
