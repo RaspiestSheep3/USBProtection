@@ -32,15 +32,12 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev) {
 
     //Known systems storage
     //TODO - encrypt this
-    ofstream fCreate("KnownCombinations.txt", ios_base::app);
-    fCreate.close();
-    
-    ifstream fIn;
-    fIn.open("KnownCombinations.txt");
+    fstream f;
+    f.open("KnownCombinations.txt");
     string fileBuffer;
     string name = "";
 
-    while (getline(fIn, fileBuffer)) {
+    while (getline(f, fileBuffer)) {
         if (
                 (fileBuffer.substr(0, 04) == bufferStr[0])
             &&  (fileBuffer.substr(4, 04) == bufferStr[1])
@@ -54,10 +51,7 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev) {
         }
     }
 
-    fIn.close();
-
     if (name == "") {
-        ofstream fOut("KnownCombinations.txt");
 
         cout << "New USB. Name : ";
         cin >> name;
@@ -65,10 +59,10 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev) {
 
         string out = bufferStr[0] + bufferStr[1] + bufferStr[2] + name + "\n";
         cout << "Out : " << out;
-        fOut << out;
-
-        fOut.close();
+        f << out;
     }
+
+    f.close();
 
 }
 
@@ -79,12 +73,12 @@ struct Condition {
     1 - Owner
     2 - Time
     3 - Known
-    4 - Friendly Name
-    5 - VID
-    6 - PID
-    7 - System Mode
+    4 - VID
+    5 - PID
+    6 - System Mode
     */
     string RHS = "";
+    char sign = '=';
 };
 
 struct ASTNode {
@@ -100,6 +94,15 @@ struct ASTNode {
     */
 };
 
+struct USBStatus {
+    //This is not strictly required but keeps things neater IMO
+    string owner = "";
+    bool known = false;
+    string VID = "";
+    string PID = "";
+    uint8_t systemMode;
+};
+
 string GenerateSubstr(string str, char start, char end) {
     string out = "";
     for (int i = str.find(start) + 1; i < str.length(); i++) {
@@ -110,10 +113,11 @@ string GenerateSubstr(string str, char start, char end) {
     return out;
 }
 
-void FormASTTreeLayer(ASTNode* node, vector<string> scope, bool isIf) {
+void FormASTTreeLayer(ASTNode* node, vector<string> scope) {
     cout << "============" << endl;
     cout << "Forming AST Layer" << endl;
 
+    cout << "Scope size : " << scope.size() << endl;
     cout << "Scope : " << endl;
     for (string line : scope) cout << line << endl;
     
@@ -125,21 +129,30 @@ void FormASTTreeLayer(ASTNode* node, vector<string> scope, bool isIf) {
         string conditionStr = GenerateSubstr(scope[0], '[', ']');
         string conditionTypeStr = GenerateSubstr(conditionStr, '~', '~');
         uint8_t conditionType = 0;
-        
-        if (conditionTypeStr == "OWNER") conditionType = 1;
-        else if (conditionTypeStr == "TIME") conditionType = 2;
-        else if (conditionTypeStr == "KNOWN") conditionType = 3;
-        else if (conditionTypeStr == "FRIENDLY_NAME") conditionType = 4;
-        else if (conditionTypeStr == "VID") conditionType = 5;
-        else if (conditionTypeStr == "PID") conditionType = 6;
-        else if (conditionTypeStr == "SYSTEM_MODE") conditionType = 7;
+        char conditionSign = '=';
 
-        Condition condition = Condition{
+        if (conditionTypeStr == "OWNER") conditionType = 1;
+        else if (conditionTypeStr == "TIME") {
+            conditionType = 2;
+            if (conditionStr.find('>') != string::npos) conditionSign = '>';
+            else if (conditionStr.find('<') != string::npos) conditionSign = '<';
+        }
+        else if (conditionTypeStr == "KNOWN") conditionType = 3;
+        else if (conditionTypeStr == "VID") conditionType = 4;
+        else if (conditionTypeStr == "PID") conditionType = 5;
+        else if (conditionTypeStr == "SYSTEM_MODE") conditionType = 6;
+
+        node->condition = new Condition{
             conditionType,
-            GenerateSubstr(conditionStr, '#', '#')
+            GenerateSubstr(conditionStr, '#', '#'),
+            conditionSign
         };
 
-        node->condition = &condition;
+        //Visualising the condition
+        cout << "Condition : " << endl;
+        cout << "Type : " << to_string(node->condition->type) << endl;
+        cout << "RHS : " << node->condition->RHS << endl;
+        cout << "Sign : " << node->condition->sign << endl;
 
         //Counting out the IF scope using depths
         uint64_t scopeDepth = 1;
@@ -155,9 +168,8 @@ void FormASTTreeLayer(ASTNode* node, vector<string> scope, bool isIf) {
             ifBlockEnd++;
         }
 
-        ASTNode ifChild;
-        FormASTTreeLayer(&ifChild, ifScope, true);
-        node->ifBlock = &ifChild;
+        node->ifBlock = new ASTNode();
+        FormASTTreeLayer(node->ifBlock, ifScope);
 
         cout << "IF Block end " << ifBlockEnd << endl;
 
@@ -175,31 +187,94 @@ void FormASTTreeLayer(ASTNode* node, vector<string> scope, bool isIf) {
                 cout << "EL Scope Section : " << scope[i] << endl;
             }
 
-            ASTNode elChild;
-            FormASTTreeLayer(&elChild, elScope, false);
-            node->elseBlock = &elChild;
+            node->elseBlock = new ASTNode();
+            FormASTTreeLayer(node->elseBlock, elScope);
         }
     }
     else {
         //In this case we are dealing with an ALLOW/REQUETS/DENY sitauton
-        ASTNode child;
-        if (scope[0] == ":ALLOW:") child.allowCode = 1;
-        else if (scope[0] == ":REQUEST:") child.allowCode = 2;
-        else child.allowCode = 3;
-        if (isIf) node->ifBlock = &child;
-        else node->elseBlock = &child;
+        cout << "ALLOW Scope : " << scope[0] << endl;
+        if (scope[0] == ":ALLOW:") node->allowCode = 1;
+        else if (scope[0] == ":REQUEST:") node->allowCode = 2;
+        else node->allowCode = 3;
     }
 
     cout << "-------" << endl;
 }
 
-bool DoesUSBMatchPolicy() {
+bool CheckCondition(Condition* condition, USBStatus* status) {
+    cout << "Checking Condition of type " << to_string(condition->type) << endl;
+
+    if (condition->type == 1) {
+        //Owner 
+        return (status->owner == condition->RHS);
+    }
+    else if (condition->type == 2) {
+        //Time
+        time_t currentTimestamp = time(NULL);
+
+        struct tm comparisonDatetime = *localtime(&currentTimestamp);;
+        comparisonDatetime.tm_hour = stoi((condition->RHS).substr(0,2));
+        comparisonDatetime.tm_min = stoi((condition->RHS).substr(3, 2));
+        comparisonDatetime.tm_sec = stoi((condition->RHS).substr(6, 2));
+        time_t comparisonTimestamp = mktime(&comparisonDatetime);
+
+        double difference = difftime(comparisonTimestamp, currentTimestamp);
+        if ((difference > 0 && condition->sign == '>') 
+            || (difference < 0 && condition->sign == '<')
+            || (difference == 0 && condition->sign == '=')) return true;
+        else return false;
+    }
+    else if (condition->type == 3) {
+        //Known
+        return(status->known == (condition->RHS == "true"));
+    }
+    else if (condition->type == 4) {
+        //VID
+        return (status->VID == condition->RHS);
+    }
+    else if (condition->type == 5) {
+        //PID
+        return (status->PID == condition->RHS);
+    }
+    else if (condition->type == 6) {
+        //System Mode
+        return (to_string(status->systemMode) == condition->RHS);
+    }
+}
+
+uint8_t NodePolicyCheck(USBStatus* status, ASTNode* node) {
+    cout << "---" << endl;
+    cout << "Node Policy Check" << endl;
+    cout << "Node overview :" << endl;
+    cout << "Node : " << (node != nullptr) << endl;
+    if (node == nullptr) throw 1000;
+    cout << "Condition : " << (node->condition != nullptr) << endl;
+    cout << "IF block : " << (node->ifBlock != nullptr) << endl;
+    cout << "EL block : " << (node->elseBlock != nullptr) << endl;
+    cout << "Allow Code : " << to_string(node->allowCode) << endl;
+    uint8_t out = 0; //Safer to assume invalid unless proved otherwise
+    
+    try {
+        if (node->condition != nullptr) {
+            if (CheckCondition(node->condition, status)) out = NodePolicyCheck(status, node->ifBlock);
+            else if (node->elseBlock != nullptr) out = NodePolicyCheck(status, node->elseBlock);
+        }
+        else out = node->allowCode;
+    }
+    catch (...) {
+        cout << "Node Policy Check failed" << endl;
+        
+    }
+    return out;
+}
+
+uint8_t DoesUSBMatchPolicy() {
     /*
         - Policy parameters
             - Owner ex
             - Time ex
             - Known ex
-            - Friendly Name ex
             - VID
             - PID
             - System Mode ex
@@ -209,7 +284,7 @@ bool DoesUSBMatchPolicy() {
             - Request
         - Default = blocked as this seems logical
     */
-    bool out = false;
+    uint8_t out = 0;
 
     //Loading in the policy path data
     ifstream f(policyPath);
@@ -227,6 +302,8 @@ bool DoesUSBMatchPolicy() {
         pos = policy.find(replace, pos + replacer.size());
     }
 
+    cout << "Policy : " << policy << endl;
+
     vector<string> policyVector = {};
 
     buffer = "";
@@ -239,26 +316,23 @@ bool DoesUSBMatchPolicy() {
     }
 
     //Forming the AST
-    vector<ASTNode*> rootNodes = {};
-
-    //We can start with the first line
-    /*
     ASTNode nodeA;
-    vector<string> subVector = {};
-    
-    uint64_t scopeLayer = 0;
-    for (string line : policyVector) {
-        subVector.push_back(line);
-        if (line.find("{") != string::npos) scopeLayer++;
-        else { if (line.find("}") != string::npos) scopeLayer--; }
-            
-        if (scopeLayer == 0) break;
-    }
-    */
+    FormASTTreeLayer(&nodeA, policyVector);
 
-    ASTNode nodeA;
-    FormASTTreeLayer(&nodeA, policyVector, true);
-    rootNodes.push_back(&nodeA);
+    cout << "Step 1 complete" << endl;
+
+    //!TEMPORARY - TO FIX
+    USBStatus testStatus = {
+        "TestOwner1",
+        true,
+        "1234",
+        "1234",
+        1
+    };
+
+    out = NodePolicyCheck(&testStatus, &nodeA);
+    if (out == 0) out = 3; //Safest to deny unless states otehrwise
+    cout << "Policy Check results : " << to_string(out) << endl;
 
     return out;
 }

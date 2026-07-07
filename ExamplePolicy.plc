@@ -1,19 +1,14 @@
 IF [ ~OWNER~ = #TEST1# ] {
-    IF[ ~FRIENDLY_NAME~ = #MyUSB# ] {
-        :ALLOW:
+    IF [ ~SYSTEM_MODE~ = #1# ] {
+        :REQUEST:
     }
     EL {
-        IF [ ~SYSTEM_MODE~ = #1# ] {
-            :REQUEST:
-        }
-        EL {
-            :DENY:
-        }
+        :DENY:
     }
 }
 EL {
     IF [ ~KNOWN~ = #true# ] {
-        IF [ ~TIME~ < #200000#] {
+        IF [ ~TIME~ < #20:00:00#] {
             :ACCEPT:
         }
         EL {
