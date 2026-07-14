@@ -61,6 +61,13 @@ string GenerateSubstr(string str, char start, char end) {
     return out;
 }
 
+string PadAndTrimStr(string str, int finalLen, char padChr = '|') {
+    //Left aligned
+    string strNew = str.substr(0, finalLen);
+    while (strNew.length() < finalLen) strNew += padChr;
+    return strNew;
+}
+
 void DBCCParser(uint64_t* bufferInt, string* bufferStr, string dbcc) {
     string VID = dbcc.substr(12, 4);
     string PID = dbcc.substr(21, 4);
@@ -78,7 +85,6 @@ void DBCCParser(uint64_t* bufferInt, string* bufferStr, string dbcc) {
 }
 
 //functions
-
 void FormASTTreeLayer(ASTNode* node, vector<string> scope) {
     cout << "============" << endl;
     cout << "Forming AST Layer" << endl;
@@ -325,6 +331,154 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev) {
     DoesUSBMatchPolicy(&usbStatus, &root);
 }
 
+void GenerateRSAKeys(RSA* rsaKeypair) {
+    //https://mojoauth.com/keypair-generation/generate-keypair-using-rsa-with-cpp#2-generating-the-rsa-key-pair
+  
+    //This nonsense is required by OPENSSL
+    auto bn = BN_new();
+    BN_set_word(bn, 65537); //Traditional e for RSA
+    RSA_generate_key_ex(rsaKeypair, 4096, bn, NULL); //Max security w/ RSA
+
+    string folderPath;
+    cout << "PEM folder path : ";
+    cin >> folderPath;
+    cout << endl;
+
+    string privatePath = folderPath + "/private.pem";
+    string publicPath = folderPath + "/public.pem";
+
+    FILE* privateKeyFile = fopen(privatePath.c_str(), "w");
+    PEM_write_RSAPrivateKey(privateKeyFile, rsaKeypair, NULL, NULL, 0, NULL, NULL);
+    fclose(privateKeyFile);
+
+    FILE* publicKeyFile = fopen(publicPath.c_str(), "w");
+    PEM_write_RSAPublicKey(publicKeyFile, rsaKeypair);
+    fclose(publicKeyFile);
+}
+
+RSA* LoadPublicKey(const string& folder)
+{
+    ifstream file(folder + "/public.pem");
+
+    string pem{
+        istreambuf_iterator<char>(file),
+        istreambuf_iterator<char>()
+    };
+
+    file.close();
+
+    BIO* bio = BIO_new_mem_buf(pem.data(), pem.size());
+
+    RSA* rsa = PEM_read_bio_RSA_PUBKEY(bio, nullptr, nullptr, nullptr);
+
+    BIO_free(bio);
+
+    return rsa;
+}
+
+RSA* LoadPrivateKey(const string& folder)
+{
+    ifstream file(folder + "/private.pem");
+
+    string pem{
+        istreambuf_iterator<char>(file),
+        istreambuf_iterator<char>()
+    };
+
+    file.close();
+
+    BIO* bio = BIO_new_mem_buf(pem.data(), pem.size());
+
+    RSA* rsa = PEM_read_bio_RSAPrivateKey(bio, nullptr, nullptr, nullptr);
+
+    BIO_free(bio);
+
+    return rsa;
+}
+
+bool RSASign(RSA* rsa,
+    const unsigned char* Msg,
+    size_t MsgLen,
+    unsigned char** EncMsg,
+    size_t* MsgLenEnc) {
+    //https://gist.github.com/irbull/08339ddcd5686f509e9826964b17bb59
+
+    EVP_MD_CTX* m_RSASignCtx = EVP_MD_CTX_create();
+    EVP_PKEY* priKey = EVP_PKEY_new();
+    //EVP_PKEY_assign_RSA(priKey, rsa);
+    EVP_PKEY_set1_RSA(priKey, rsa);
+    if (EVP_DigestSignInit(m_RSASignCtx, NULL, EVP_sha256(), NULL, priKey) <= 0) {
+        return false;
+    }
+    if (EVP_DigestSignUpdate(m_RSASignCtx, Msg, MsgLen) <= 0) {
+        return false;
+    }
+    if (EVP_DigestSignFinal(m_RSASignCtx, NULL, MsgLenEnc) <= 0) {
+        return false;
+    }
+    *EncMsg = (unsigned char*)malloc(*MsgLenEnc);
+    if (EVP_DigestSignFinal(m_RSASignCtx, *EncMsg, MsgLenEnc) <= 0) {
+        return false;
+    }
+
+    EVP_PKEY_free(priKey);
+    EVP_MD_CTX_free(m_RSASignCtx);
+    return true;
+}
+
+string sha256(const string& str)
+{
+    //https://stackoverflow.com/questions/2262386/generate-sha256-with-openssl-and-c
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    SHA256_Update(&sha256, str.c_str(), str.size());
+    SHA256_Final(hash, &sha256);
+    stringstream ss;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+    {
+        ss << hex << setw(2) << setfill('0') << (int)hash[i];
+    }
+    return ss.str();
+}
+
+void GenerateSignature(RSA*& keypair, string* signatureInfo, string folderPath) {
+    cout << "Generating signature" << endl;
+    //Data preprocessing
+    signatureInfo[0] = PadAndTrimStr(signatureInfo[0], 128);
+    signatureInfo[1] = PadAndTrimStr(signatureInfo[1], 128);
+
+    time_t timestamp = time(NULL);
+    tm * ptm = gmtime(&timestamp);
+    char buffer[32];
+    strftime(buffer, sizeof(buffer), "%S%M%H%d%m%Y", ptm);
+    signatureInfo[2] = buffer;
+
+    string combinedNoHash = signatureInfo[0] + signatureInfo[1] + signatureInfo[2] + signatureInfo[3];
+
+    string hash = sha256(combinedNoHash);
+    cout << "Hash : " << hash << endl;
+
+    string combinedWithHash = hash + combinedNoHash;
+
+    unsigned char* signature = nullptr;
+    size_t signatureLen = 0;
+
+    bool result = RSASign(keypair, reinterpret_cast<const unsigned char*>(combinedWithHash.c_str()), combinedWithHash.length(), &signature, &signatureLen);
+    
+    //Writing to output
+    ofstream f;
+    f.open(folderPath + "/signature.sig");
+    f << (hash + "\n");
+    f << (signatureInfo[0] + "\n");
+    f << (signatureInfo[1] + "\n");
+    f << (signatureInfo[2] + "\n");
+    f << (signatureInfo[3] + "\n");
+    f << signature;
+
+    f.close();
+
+}
 
 //Windows stuff
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //I think this triggers when a windows thing occurs
@@ -361,98 +515,162 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
 }
 
 int main() {
-    cout << "Policy Path : ";
-    cin >> policyPath;
-    cout << endl;
-
     string inputBuffer;
-    cout << "System Policy Mode : ";
+
+    cout << "Boot Mode : \n1 - Register USB \n2 - CheckUSB \n3 - USB Scanning" << endl;
+    cout << "Chosen boot mode : ";
     cin >> inputBuffer;
-    cout << endl;
-    systemMode = stoi(inputBuffer);
+    if (stoi(inputBuffer) == 1) {
+        //Register USB Mode
 
-    //Writing the policy
-    
-    //Loading in the policy path data
-    ifstream f(policyPath);
-    string policy;
-    string buffer;
-    while (getline(f, buffer)) { policy += (buffer + "\n"); }
-    f.close();
+        //RSA key genreation stuff
+        RSA *keypair = RSA_new();
 
-    //Cleaning up the policy
-    size_t pos = policy.find("    ");
-    string replace = "    ";
-    string replacer = "";
-    while (pos != string::npos) {
-        policy.replace(pos, replace.size(), replacer);
-        pos = policy.find(replace, pos + replacer.size());
-    }
+        cout << "Should generate new RSA keypair ? (Y/N) : ";
+        cin >> inputBuffer;
+        cout << endl;
 
-    cout << "Policy : " << policy << endl;
-
-    vector<string> policyVector = {};
-
-    buffer = "";
-    for (int i = 0; i < policy.length(); i++) {
-        if (policy[i] == '\n') {
-            if (buffer != "\n" && buffer != "") policyVector.push_back(buffer); //IF statement removes blank lines to keep things llean
-            buffer = "";
+        if (inputBuffer == "Y" || inputBuffer == "y") GenerateRSAKeys(keypair);
+        else {
+            cout << "Keypair Folder Path : ";
+            cin >> inputBuffer;
+            cout << endl;
+            
+            keypair = LoadPrivateKey(inputBuffer);
         }
-        else buffer += policy[i];
+
+        //Signign the file
+        /*
+        We want to include :
+            Hash - 64 characters (hex)
+            Owner - 128 characters
+            Name - 128 characters
+            Timestamp - ssmmHHDDMMYYYY - 14 characters
+            - Sum : 334 characters
+            Comments - All subsequent characters
+                - General informatoin, descriptions etc.
+                - Not required
+        */
+        string signatureInfo[4];
+        
+        cout << "Owner (max 128 chrs, do not use |) : ";
+        cin >> signatureInfo[0];
+        cout << endl;
+
+        cout << "Device Name (max 128 chrs, do not use |) : ";
+        cin >> signatureInfo[1];
+        cout << endl;
+
+        cout << "Extra Comments (not required, no newline characters) : ";
+        cin >> signatureInfo[3];
+        cout << endl;
+
+        cout << "USB Path : ";
+        cin >> inputBuffer;
+        cout << endl;
+
+
+        GenerateSignature(keypair, signatureInfo, inputBuffer);
+
     }
-    
-    //Forming the AST
-    FormASTTreeLayer(&root, policyVector);
+    else if (stoi(inputBuffer) == 2) {
 
-    cout << "Listening for USB plugin events... Press Ctrl+C to exit.\n\n";
-
-    //The below code was generated by AI and detects USBs being plugged in
-    // 1. Register a dummy window class to receive system messages
-    WNDCLASS wc = {};
-    wc.lpfnWndProc = WndProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = "USBDetectorClass";
-    RegisterClass(&wc);
-
-    // 2. Create a hidden background window
-    HWND hwnd = CreateWindowEx(
-        0, "USBDetectorClass", "USB Detector",
-        0, 0, 0, 0, 0,
-        HWND_MESSAGE, // Makes it a message-only background window
-        NULL, NULL, NULL
-    );
-
-    if (!hwnd) {
-        std::cerr << "Failed to create background message window.\n";
-        return 1;
     }
+    else if (stoi(inputBuffer) == 3) {
+        //USB Scanning Mode
 
-    // 3. Register to receive specific notifications for USB Hubs/Devices
-    DEV_BROADCAST_DEVICEINTERFACE notificationFilter = {};
-    notificationFilter.dbcc_size = sizeof(DEV_BROADCAST_DEVICEINTERFACE);
-    notificationFilter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
-    notificationFilter.dbcc_classguid = GUID_DEVINTERFACE_USB_DEVICE; // Fires for ALL USB devices
+        cout << "Policy Path : ";
+        cin >> policyPath;
+        cout << endl;
 
-    HDEVNOTIFY hDevNotify = RegisterDeviceNotification(
-        hwnd,
-        &notificationFilter,
-        DEVICE_NOTIFY_WINDOW_HANDLE
-    );
+        cout << "System Policy Mode : ";
+        cin >> inputBuffer;
+        cout << endl;
+        systemMode = stoi(inputBuffer);
 
-    if (!hDevNotify) {
-        std::cerr << "Failed to register device notifications. Error: " << GetLastError() << "\n";
-        return 1;
+        //Writing the policy
+
+        //Loading in the policy path data
+        ifstream f(policyPath);
+        string policy;
+        string buffer;
+        while (getline(f, buffer)) { policy += (buffer + "\n"); }
+        f.close();
+
+        //Cleaning up the policy
+        size_t pos = policy.find("    ");
+        string replace = "    ";
+        string replacer = "";
+        while (pos != string::npos) {
+            policy.replace(pos, replace.size(), replacer);
+            pos = policy.find(replace, pos + replacer.size());
+        }
+
+        cout << "Policy : " << policy << endl;
+
+        vector<string> policyVector = {};
+
+        buffer = "";
+        for (int i = 0; i < policy.length(); i++) {
+            if (policy[i] == '\n') {
+                if (buffer != "\n" && buffer != "") policyVector.push_back(buffer); //IF statement removes blank lines to keep things llean
+                buffer = "";
+            }
+            else buffer += policy[i];
+        }
+
+        //Forming the AST
+        FormASTTreeLayer(&root, policyVector);
+
+        cout << "Listening for USB plugin events... Press Ctrl+C to exit.\n\n";
+
+        //The below code was generated by AI and detects USBs being plugged in
+        // 1. Register a dummy window class to receive system messages
+        WNDCLASS wc = {};
+        wc.lpfnWndProc = WndProc;
+        wc.hInstance = GetModuleHandle(NULL);
+        wc.lpszClassName = "USBDetectorClass";
+        RegisterClass(&wc);
+
+        // 2. Create a hidden background window
+        HWND hwnd = CreateWindowEx(
+            0, "USBDetectorClass", "USB Detector",
+            0, 0, 0, 0, 0,
+            HWND_MESSAGE, // Makes it a message-only background window
+            NULL, NULL, NULL
+        );
+
+        if (!hwnd) {
+            std::cerr << "Failed to create background message window.\n";
+            return 1;
+        }
+
+        // 3. Register to receive specific notifications for USB Hubs/Devices
+        DEV_BROADCAST_DEVICEINTERFACE notificationFilter = {};
+        notificationFilter.dbcc_size = sizeof(DEV_BROADCAST_DEVICEINTERFACE);
+        notificationFilter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+        notificationFilter.dbcc_classguid = GUID_DEVINTERFACE_USB_DEVICE; // Fires for ALL USB devices
+
+        HDEVNOTIFY hDevNotify = RegisterDeviceNotification(
+            hwnd,
+            &notificationFilter,
+            DEVICE_NOTIFY_WINDOW_HANDLE
+        );
+
+        if (!hDevNotify) {
+            std::cerr << "Failed to register device notifications. Error: " << GetLastError() << "\n";
+            return 1;
+        }
+
+        // 4. Standard Windows Message Loop to keep the thread alive and processing
+        MSG msg;
+        while (GetMessage(&msg, NULL, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg); //This calls the WndProc
+        }
+
+        // Cleanup when exiting
+        UnregisterDeviceNotification(hDevNotify);
+        return 0;
     }
-
-    // 4. Standard Windows Message Loop to keep the thread alive and processing
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg); //This calls the WndProc
-    }
-
-    // Cleanup when exiting
-    UnregisterDeviceNotification(hDevNotify);
-    return 0;
 }

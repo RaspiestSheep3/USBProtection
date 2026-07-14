@@ -15,3 +15,11 @@
 #include <algorithm>
 #include <vector>
 #include <ctime>
+#include <openssl/rsa.h>
+#include <openssl/pem.h>
+#include <openssl/bio.h>
+#include <openssl/applink.c>
+#include <openssl/evp.h>
+#include <openssl/sha.h>
+#include <sstream>
+#include <iomanip>
