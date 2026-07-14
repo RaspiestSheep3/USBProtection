@@ -475,9 +475,13 @@ void GenerateSignature(RSA*& keypair, string* signatureInfo, string folderPath) 
     f << (signatureInfo[2] + "\n");
     f << (signatureInfo[3] + "\n");
     f << signature;
-
+    
     f.close();
 
+    //Creating a copy of the public key in the USB section - this will be used for the logs
+    FILE* privateKeyFile = fopen((folderPath + "/public.pem").c_str(), "w");
+    PEM_write_RSAPrivateKey(privateKeyFile, keypair, NULL, NULL, 0, NULL, NULL);
+    fclose(privateKeyFile);
 }
 
 //Windows stuff
