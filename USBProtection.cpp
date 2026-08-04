@@ -51,6 +51,7 @@ string knownCombinationsFilePath;
 string knownKeypairsPath;
 uint8_t systemMode;
 ASTNode root;
+bool shouldLearnNewDevices = false;
 
 //Helpers
 string GenerateSubstr(string str, char start, char end) {
@@ -615,18 +616,20 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
     }
 
     if (name == "") {
+        if (shouldLearnNewDevices) {
 
-        cout << "New USB. Name : ";
-        cin >> name;
-        cout << endl;
+            cout << "New USB. Name : ";
+            cin >> name;
+            cout << endl;
 
-        string out = VID + PID + serial + name + "\n";
-        cout << "Out : " << out;
+            string out = VID + PID + serial + name + "\n";
+            cout << "Out : " << out;
 
-        //File nosnesnse
-        f.clear();
-        f.seekp(0, ios::end);
-        f << out;
+            //File nosnesnse
+            f.clear();
+            f.seekp(0, ios::end);
+            f << out;
+        }
     }
 
     f.close();
@@ -868,6 +871,12 @@ int main() {
         cin >> inputBuffer;
         cout << endl;
         systemMode = stoi(inputBuffer);
+
+        cout << "Should learn new devices? (Y/N) : ";
+        cin >> inputBuffer;
+        cout << endl;
+        if (inputBuffer == "y" || inputBuffer == "Y") shouldLearnNewDevices = true;
+        else shouldLearnNewDevices = false;
 
         //Writing the policy
 
