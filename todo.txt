@@ -1,4 +1,14 @@
-- Allow to actually request / deny based on policy
+- Allow to actually request / deny based on policy- DONE
+- Load OWNER into USB status objects - DONE
+- Deal with learning new USBs vs new USBs being blocked
 - Log changes in a USB log file
 - Read the log in boot mode 2
 - Clean up output
+
+- Note - this project assumes the main system is safe - MENTION IN README
+- Note - "UNKNOWN" as the Owner is reserved for actually unknown names
+- Note - we cant trust the USB for the owners public key for key verification
+    - This must be sent out of channel
+    - If the relevant public key is unknown, we treat it as fake.
+    - All keypairs should be written as <owner>.pem e.g. JohnAdams.pem
+        - This should include your own keypair

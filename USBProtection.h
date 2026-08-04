@@ -23,3 +23,5 @@
 #include <openssl/sha.h>
 #include <sstream>
 #include <iomanip>
+#include <cfgmgr32.h>
+#pragma comment (lib, "cfgmgr32.lib")
