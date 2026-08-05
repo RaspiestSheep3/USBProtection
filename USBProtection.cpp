@@ -45,6 +45,12 @@ struct USBStatus {
     string customName = "";
 };
 
+struct USBFile {
+    string name = "";
+    uint64_t fileSize = 0;
+    string fileHash = "";
+};
+
 //System settings
 string policyPath;
 string knownCombinationsFilePath;
@@ -208,6 +214,7 @@ string BytesToHex(const unsigned char* data, size_t len) {
     return ss.str();
 }
 
+//AI
 // Convert Hex string back to binary bytes
 vector<unsigned char> HexToBytes(const string& hexStr) {
     vector<unsigned char> bytes;
@@ -217,6 +224,75 @@ vector<unsigned char> HexToBytes(const string& hexStr) {
         bytes.push_back(byte);
     }
     return bytes;
+}
+
+//Adapated from https://www.geeksforgeeks.org/cpp/get-the-md5-hash-of-a-file-in-cpp/
+void MD5FromFile(const string &filePath, unsigned char* out) {
+    ifstream file(filePath, ios::in | ios::binary | ios::ate);
+
+    if (!file.is_open()) {
+        cerr << "Error: Cannot open file: " << filePath << endl;
+        return;
+    }
+
+    // Get file size
+    long fileSize = file.tellg();
+    cout << "File size: " << fileSize << " bytes" << endl;
+
+    // Allocate memory to hold the entire file
+    char* memBlock = new char[fileSize];
+
+    // Read the file into memory
+    file.seekg(0, ios::beg);
+    file.read(memBlock, fileSize);
+    file.close();
+
+    // Compute the MD5 hash of the file content
+    MD5((unsigned char*)memBlock, fileSize, out);
+
+    // Clean up
+    delete[] memBlock;
+}
+
+string ProcessMD5(unsigned char* md, long size = MD5_DIGEST_LENGTH) {
+    string out = "";
+    for (int i = 0; i < size; i++) {
+        cout << hex << setw(2) << setfill('0') << (int)md[i];
+    }
+    cout << dec << endl;
+
+    return out;
+}
+
+void WriteEncryptedLogEntry(string entry, string driveLetter) {
+    string filePath = driveLetter + "usb.log";
+
+    time_t timestamp = time(NULL);
+    tm* ptm = gmtime(&timestamp);
+    char buffer[32];
+    strftime(buffer, sizeof(buffer), "%S%M%H%d%m%Y", ptm);
+    entry = (string)buffer + " : " + entry;
+    
+    RSA* ownerPublic = LoadPublicKey(driveLetter + "public.pem", "");
+
+    int rsaLen = RSA_size(ownerPublic);
+    unsigned char* encryptedBuffer = new unsigned char[rsaLen];
+
+    int encryptedLength = RSA_public_encrypt(
+        entry.length(),                         
+        (const unsigned char*)entry.c_str(),    
+        encryptedBuffer,                        
+        ownerPublic,                            
+        RSA_PKCS1_OAEP_PADDING                  
+    );
+
+    ofstream f(filePath, ios_base::app | ios_base::out);
+    f.write((char*)encryptedBuffer, encryptedLength);
+    f.write("\n",1);
+    f.close();
+
+    RSA_free(ownerPublic);
+    delete[] encryptedBuffer;
 }
 
 //functions
@@ -482,6 +558,166 @@ bool RSAVerify(RSA* rsa, const unsigned char* Msg, size_t MsgLen, const unsigned
     return result;
 }
 
+void WatchUSB(string driveLetter) {
+    cout << "Watching : " << driveLetter << endl;
+    
+    //Windows stuff is AI
+    HANDLE hDir = CreateFileA(
+        driveLetter.c_str(),
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, // Let other programs still use it
+        NULL,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS, // Required for getting a handle to a directory
+        NULL
+    );
+
+    if (hDir == INVALID_HANDLE_VALUE) {
+        cout << "Failed to open directory." << endl;
+        return;
+    }
+
+    //First I want to note the existing situation
+    unordered_map<string, USBFile> usbFiles;
+
+    //BFS
+    vector<string> pathQueue = {driveLetter};
+    while (pathQueue.size() > 0) {
+        string path = pathQueue[0];
+        pathQueue.erase(pathQueue.begin());
+
+        for (const auto& entry : filesystem::directory_iterator(path)) {
+            if (filesystem::is_directory(entry.path())) {
+                pathQueue.push_back((entry.path()).string());
+                //cout << "Directory : " << entry.path() << endl;
+
+            }
+            else if (filesystem::is_regular_file(entry.path())) {
+                cout << "File : " << entry.path() << endl;
+                
+                unsigned char out[MD5_DIGEST_LENGTH];
+
+                MD5FromFile((entry.path()).string(), out);
+                string md5 = BytesToHex(out, MD5_DIGEST_LENGTH);
+
+                USBFile usb{
+                    (entry.path()).string(),
+                    filesystem::file_size(entry.path()),
+                    md5
+                };
+
+                usbFiles[usb.name] = usb;
+            
+            }
+            else cout << "Other? : " << entry.path() << endl;
+        }
+    }
+
+    char buffer[1024];
+    DWORD bytesReturned;
+
+    cout << "Watching for changes..." << endl;
+
+    // 2. This function will BLOCK (freeze the thread) until a change happens
+    while (true) { //This loop means we infinetly accept events
+        bool success = ReadDirectoryChangesW(
+            hDir,
+            &buffer,
+            sizeof(buffer),
+            TRUE, // Watch all subfolders too
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
+            &bytesReturned,
+            NULL,
+            NULL
+        );
+
+        if (success) {
+            cout << "A file was created, modified, or deleted on the USB!" << endl;
+            FILE_NOTIFY_INFORMATION* notifyInfo = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer);
+            
+            string action4OldNameBuffer = "";
+            while (true) { //This loop means we get everythign out the buffer
+                DWORD characterCount = notifyInfo->FileNameLength / sizeof(WCHAR); //Used in windows so we use ig
+                wstring wstr(notifyInfo->FileName, characterCount);
+                string fileName(wstr.begin(), wstr.end());
+                if (fileName == "usb.log") continue; //Otherwise we'll end up in an infinite
+                fileName = driveLetter + fileName;
+
+                cout << "File name : " << fileName << endl;
+                DWORD action = notifyInfo->Action;
+
+                USBFile entry = usbFiles[fileName];
+                string unencryptedBaseEntry;
+
+                cout << "Action : " << to_string(action) << endl;
+
+                //NTS - https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-file_notify_information
+                if (action == 1) {
+                    unencryptedBaseEntry = fileName + " was created  | Action Type 1";
+                    entry.name = fileName;
+
+                    unsigned char out[MD5_DIGEST_LENGTH];
+                    MD5FromFile(fileName, out);
+                    string newMD5 = BytesToHex(out, MD5_DIGEST_LENGTH);
+                    entry.fileHash = newMD5;
+                    
+                    usbFiles[fileName] = entry;
+                }
+                else if (action == 2) {
+                    unencryptedBaseEntry = fileName + " was deleted (hash = " + entry.fileHash + ", size = " + to_string(entry.fileSize) + "B) | Action Type 2";
+                    usbFiles.erase(fileName);
+
+                }
+                else if (action == 3) {
+                    uint64_t oldSize = entry.fileSize;
+                    string oldHash = entry.fileHash;
+
+                    uint64_t newSize = filesystem::file_size(fileName);
+                    unsigned char out[MD5_DIGEST_LENGTH];
+                    MD5FromFile(fileName, out);
+                    string newMD5 = BytesToHex(out, MD5_DIGEST_LENGTH);
+
+                    entry.fileHash = newMD5;
+                    entry.fileSize = newSize;
+
+                    usbFiles[fileName] = entry;
+
+                    unencryptedBaseEntry = fileName + "was modified (old hash = " + oldHash + ", old size = " + to_string(oldSize) + "B, new hash = " + newMD5 + ", new size = " + to_string(newSize) + "B  | Action Type 3";
+                }
+                else if (action == 4) {
+                    action4OldNameBuffer = fileName;
+                }
+                else if (action == 5) {
+                    unencryptedBaseEntry = action4OldNameBuffer + " was renamed to " + fileName + " | Action Type 5";
+                    usbFiles.erase(action4OldNameBuffer);
+                    entry.name = fileName;
+                    usbFiles[fileName] = entry;
+                }
+                else cout << "Unprocessed action : " << to_string(action) << endl;
+                
+                if (unencryptedBaseEntry != "") {
+                    cout << "Entry : " << unencryptedBaseEntry << endl;
+                    WriteEncryptedLogEntry(unencryptedBaseEntry, driveLetter);
+                }
+                
+                //The notify can hold multiple events, so we have to make sure w eget each one
+                if (notifyInfo->NextEntryOffset == 0) {
+                    cout << "Event complete" << endl;
+                    break;
+                }
+                else {
+                    notifyInfo = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(
+                        reinterpret_cast<char*>(notifyInfo) + notifyInfo->NextEntryOffset
+                    );
+                }
+            }
+        }
+        
+    }
+
+    CloseHandle(hDir);
+}
+
 void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWriteDev) {
     cout << "DBCC NAME : " << dev->dbcc_name << endl;
     uint64_t bufferInt[3] = { 0 };
@@ -494,11 +730,13 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
     string formattedID = "USB\\VID_" + VID + "&PID_" + PID + "\\" + serial;
 
     string deviceOwner = "UNKNOWN";
+    char volLetter = '~'; //NULL
+
     if (readWriteDev != nullptr) {
         //We can try read the read write storage thing
         cout << "Attempting to read device owner" << endl;
         DWORD unitMask = readWriteDev->dbcv_unitmask;
-        char volLetter = 'A';
+        volLetter = 'A';
 
         while (true) {
             if (unitMask & 0x01) break;
@@ -647,6 +885,8 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
     uint8_t result = DoesUSBMatchPolicy(&usbStatus, &root);
     cout << "Policy Result : " << to_string(result) << endl;
 
+    bool ejected = false;
+
     if (result == 2) {
         cout << "Request for the following device : " << endl;
         cout << "--------------------------------" << endl;
@@ -664,11 +904,20 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
         cout << "\nAllow? (Y/N) : ";
         cin >> allowInput;
         cout << endl;
-        if(!(allowInput == "Y" || allowInput == "y")) EjectUSB(formattedID);
+        if (!(allowInput == "Y" || allowInput == "y")) {
+            EjectUSB(formattedID);
+            ejected = true;
+        }
     }
     else if (result == 3) {
         cout << "Denial" << endl;
         EjectUSB(formattedID);
+        ejected = true;
+    }
+
+    if (!ejected) {
+        //Watching USBs
+        WatchUSB((string() + volLetter) + ":\\");
     }
 }
 
@@ -734,7 +983,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
 
         switch (wParam) {
         case DBT_DEVICEARRIVAL: //USB was plugged in
-            std::cout << "[+] A device was plugged in! ";
+           cout << "[+] A device was plugged in! ";
             /*
             We have an issue here where the VOLUME send is sent after the INTERFACE one
             However, for my headphones it only sends the INTERFACE, so ew can't wire HandleUSB up to the VOLUME
@@ -751,7 +1000,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
             }
 
             else if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) { //DBT describes plug-and-play stuff
-                std::cout << "(USB Interface Detected)\n";
+                cout << "(USB Interface Detected)\n";
             
                 auto dev = ((DEV_BROADCAST_DEVICEINTERFACE*)lpHdr);
                 
@@ -770,19 +1019,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
                 else HandleUSB(dev, nullptr);
             }
             else {
-                std::cout << "\n";
+                cout << "\n";
             }
 
             break;
 
 
         case DBT_DEVICEREMOVECOMPLETE: //USB removed
-            std::cout << "[-] A device was removed! ";
+            cout << "[-] A device was removed! ";
             if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
-                std::cout << "(USB Interface Disconnected)\n";
+                cout << "(USB Interface Disconnected)\n";
             }
             else {
-                std::cout << "\n";
+                cout << "\n";
             }
             break;
         }
@@ -931,7 +1180,7 @@ int main() {
         );
 
         if (!hwnd) {
-            std::cerr << "Failed to create background message window.\n";
+            cerr << "Failed to create background message window.\n";
             return 1;
         }
 
@@ -948,7 +1197,7 @@ int main() {
         );
 
         if (!hDevNotify) {
-            std::cerr << "Failed to register device notifications. Error: " << GetLastError() << "\n";
+            cerr << "Failed to register device notifications. Error: " << GetLastError() << "\n";
             return 1;
         }
 

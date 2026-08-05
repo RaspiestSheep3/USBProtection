@@ -24,4 +24,8 @@
 #include <sstream>
 #include <iomanip>
 #include <cfgmgr32.h>
+#include <thread>
+#include <openssl/md5.h>
+#include <filesystem>
+#include <unordered_map>
 #pragma comment (lib, "cfgmgr32.lib")
