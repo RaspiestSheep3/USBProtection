@@ -286,13 +286,57 @@ void WriteEncryptedLogEntry(string entry, string driveLetter) {
         RSA_PKCS1_OAEP_PADDING                  
     );
 
-    ofstream f(filePath, ios_base::app | ios_base::out);
+    ofstream f(filePath, ios_base::app | ios_base::out | ios_base::binary);
     f.write((char*)encryptedBuffer, encryptedLength);
     f.write("\n",1);
     f.close();
 
     RSA_free(ownerPublic);
     delete[] encryptedBuffer;
+}
+
+vector<string> DecryptEntry(RSA* privKey, string filePath) {
+    vector<string> out = {};
+
+    if (privKey == nullptr) {
+        cout << "pviv key nullptr" << endl;
+        return out;
+    }
+
+    int rsaLen = RSA_size(privKey);
+    unsigned char* encryptedChunk = new unsigned char[rsaLen];
+    unsigned char* decryptedBuffer = new unsigned char[rsaLen]; 
+
+    ifstream f(filePath, ios_base::in | ios_base::binary);
+
+    while (f.read((char*)encryptedChunk, rsaLen)) {
+
+        // 5. Decrypt the chunk
+        int decryptedLength = RSA_private_decrypt(
+            rsaLen,
+            encryptedChunk,
+            decryptedBuffer,
+            privKey,
+            RSA_PKCS1_OAEP_PADDING
+        );
+
+        if (decryptedLength == -1) {
+            cout << "Length = -1" << endl;
+            return out;
+        }
+
+        string plaintext((char*)decryptedBuffer, decryptedLength);
+        out.push_back(plaintext);
+
+       
+        char endLine;
+        f.read(&endLine, 1);
+    }
+
+    RSA_free(privKey);
+    f.close();
+
+    return out;
 }
 
 //functions
@@ -640,7 +684,10 @@ void WatchUSB(string driveLetter) {
                 DWORD characterCount = notifyInfo->FileNameLength / sizeof(WCHAR); //Used in windows so we use ig
                 wstring wstr(notifyInfo->FileName, characterCount);
                 string fileName(wstr.begin(), wstr.end());
-                if (fileName == "usb.log") continue; //Otherwise we'll end up in an infinite
+                if (fileName == "usb.log") {
+                    cout << "Log edit - breaking";
+                    break; //Otherwise we'll end up in an infinite
+                }
                 fileName = driveLetter + fileName;
 
                 cout << "File name : " << fileName << endl;
@@ -682,7 +729,7 @@ void WatchUSB(string driveLetter) {
 
                     usbFiles[fileName] = entry;
 
-                    unencryptedBaseEntry = fileName + "was modified (old hash = " + oldHash + ", old size = " + to_string(oldSize) + "B, new hash = " + newMD5 + ", new size = " + to_string(newSize) + "B  | Action Type 3";
+                    unencryptedBaseEntry = fileName + " was modified (old hash = " + oldHash + ", old size = " + to_string(oldSize) + "B, new hash = " + newMD5 + ", new size = " + to_string(newSize) + "B) | Action Type 3";
                 }
                 else if (action == 4) {
                     action4OldNameBuffer = fileName;
@@ -1099,6 +1146,22 @@ int main() {
 
     }
     else if (stoi(inputBuffer) == 2) {
+        //USB log checking mode 
+        cout << "USB log path : ";
+        cin >> inputBuffer;
+        cout << endl;
+        string logPath = inputBuffer;
+        
+        cout << "Key folder : ";
+        cin >> inputBuffer;
+        cout << endl;
+
+        RSA* privateKey = LoadPrivateKey(inputBuffer);
+
+        cout << "Decrypting entries" << endl;
+        vector<string> log = DecryptEntry(privateKey, logPath);
+
+        for (string entry : log) cout << "Entry : " << entry << endl;
 
     }
     else if (stoi(inputBuffer) == 3) {
