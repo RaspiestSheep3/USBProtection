@@ -1,10 +1,12 @@
 - Allow to actually request / deny based on policy- DONE
 - Load OWNER into USB status objects - DONE
 - Deal with learning new USBs vs new USBs being blocked - DONE
-- Log changes in a USB log file - ONGOING
+- Log changes in a USB log file - DONE
 - When making the signature intialise the log
-- Read the log in boot mode 2
-    - Build a system to check for inconsistencies
+- Read the log in boot mode 2 - DONE
+    - Build a system to check for inconsistencies - ONGOING
+    - In discontinuity checker do another scan and measure against last log
+- Make a way to be able to take out the USB without having to close the program
 - Clean up output
 
 - Note - this project assumes the main system is safe - MENTION IN README

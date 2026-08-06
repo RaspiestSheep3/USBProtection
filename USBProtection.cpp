@@ -48,7 +48,7 @@ struct USBStatus {
 struct USBFile {
     string name = "";
     uint64_t fileSize = 0;
-    string fileHash = "";
+    string fileHash = "d41d8cd98f00b204e9800998ecf8427e"; //This is the hash for nothing under MD5
 };
 
 //System settings
@@ -700,7 +700,7 @@ void WatchUSB(string driveLetter) {
 
                 //NTS - https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-file_notify_information
                 if (action == 1) {
-                    unencryptedBaseEntry = fileName + " was created  | Action Type 1";
+                    unencryptedBaseEntry = '?' + fileName + "? was created | Action Type 1";
                     entry.name = fileName;
 
                     unsigned char out[MD5_DIGEST_LENGTH];
@@ -711,7 +711,7 @@ void WatchUSB(string driveLetter) {
                     usbFiles[fileName] = entry;
                 }
                 else if (action == 2) {
-                    unencryptedBaseEntry = fileName + " was deleted (hash = " + entry.fileHash + ", size = " + to_string(entry.fileSize) + "B) | Action Type 2";
+                    unencryptedBaseEntry = '?' + fileName + "? was deleted (hash = ?" + entry.fileHash + "?, size = ?" + to_string(entry.fileSize) + "?B) | Action Type 2";
                     usbFiles.erase(fileName);
 
                 }
@@ -729,13 +729,13 @@ void WatchUSB(string driveLetter) {
 
                     usbFiles[fileName] = entry;
 
-                    unencryptedBaseEntry = fileName + " was modified (old hash = " + oldHash + ", old size = " + to_string(oldSize) + "B, new hash = " + newMD5 + ", new size = " + to_string(newSize) + "B) | Action Type 3";
+                    unencryptedBaseEntry = "?" + fileName + "? was modified (old hash = ?" + oldHash + "?, old size = ?" + to_string(oldSize) + "?B, new hash = ?" + newMD5 + "?, new size = ?" + to_string(newSize) + "?B) | Action Type 3";
                 }
                 else if (action == 4) {
                     action4OldNameBuffer = fileName;
                 }
                 else if (action == 5) {
-                    unencryptedBaseEntry = action4OldNameBuffer + " was renamed to " + fileName + " | Action Type 5";
+                    unencryptedBaseEntry = "?" + action4OldNameBuffer + "? was renamed to ?" + fileName + "? | Action Type 5";
                     usbFiles.erase(action4OldNameBuffer);
                     entry.name = fileName;
                     usbFiles[fileName] = entry;
@@ -1021,6 +1021,168 @@ void GenerateSignature(RSA*& keypair, string* signatureInfo, string folderPath) 
     fclose(publicKeyFile);
 }
 
+string FormatTime(string raw) {
+    string second = raw.substr(0, 2);
+    string minute = raw.substr(2, 2);
+    string hour = raw.substr(4, 2);
+    string day = raw.substr(6, 2);
+    string month = raw.substr(8, 2);
+    string year = raw.substr(10, 4);
+
+    string timestamp = hour + ":" + minute + ":" + second + " " + day + "/" + month + "/" + year;
+
+    return timestamp;
+}
+
+string FormatLogEntry(string rawEntry) {
+    string out = rawEntry;
+    erase(out, '?');
+
+    string timestamp = FormatTime(rawEntry);
+    out.erase(0, 14);
+    out = timestamp + out;
+
+    return out;
+}
+
+void WarnAboutDiscontinuity(string discontinuity, string formattedTimestamp, int actionType) {
+    //Probably spelt wrong
+    cout << "Action type : " << to_string(actionType) << endl;
+    cout << "Discontinuity warning! : \n" << discontinuity << " (" << formattedTimestamp << ")" << endl;
+}
+
+void SearchForDiscontinuities(vector<string> log) {
+    //No clue how to spell this word, hopefully this is correct
+    unordered_map<string, USBFile> files;
+
+    cout << log.size() << endl;
+
+    for (string entry : log) {
+        //Step 1 - find the action type
+        uint8_t actionType = atoi(&entry.c_str()[entry.length() - 1]);
+           
+        //Key entries are stuff like the hash and size
+        vector<string> keyEntries = {};
+        string buffer = "";
+        bool reading = false;
+        for (char character : entry) {
+            if (character == '?') {
+                if (reading) {
+                    keyEntries.push_back(buffer);
+                    buffer = "";
+                }
+                reading = !reading;
+            }
+            else if (reading) buffer += character;
+        }
+
+        string timestamp = FormatTime(entry);
+
+        if (actionType == 1) {
+            //The only way I can find this fails is if the file alr exists
+            //Key entry structure - fileName
+            if (files.count(keyEntries[0]) == 1) WarnAboutDiscontinuity(
+                keyEntries[0] + " already exists but is being recreated", 
+                timestamp,
+                1
+            );
+            else {
+                USBFile newEntry = {
+                    keyEntries[0],
+                    0,
+                    "d41d8cd98f00b204e9800998ecf8427e"
+                };
+
+                files[keyEntries[0]] = newEntry;
+            }
+        }
+
+        else if (actionType == 2) {
+            //This can fail if the old version does not exist or is wrong
+            //Key entry structure - name, hash, size
+            if (files.count(keyEntries[0]) == 0) WarnAboutDiscontinuity(
+                keyEntries[0] + " does not exist but was deleted",
+                timestamp,
+                2
+            );
+            else {
+                USBFile file = files[keyEntries[0]];
+                if (file.fileHash != keyEntries[1]) WarnAboutDiscontinuity(
+                    keyEntries[0] + " has the wrong hash - it should have " + file.fileHash + " but has " + keyEntries[1],
+                    timestamp,
+                    2
+                );
+                if (file.fileSize != stoi(keyEntries[2])) WarnAboutDiscontinuity(
+                    keyEntries[0] + " has the wrong size - it should have " + to_string(file.fileSize) + " but has " + keyEntries[2],
+                    timestamp,
+                    2
+                );
+
+                files.erase(keyEntries[0]);
+            }
+        }
+
+        else if (actionType == 3) {
+            //Issue 1 - the file doenst exist
+            //Issue 2 - the old hash / size was wrong
+            //key entry - file name, old hash, old size, new hash, new size
+            //Quite similar to 2 actually
+
+            if(files.count(keyEntries[0]) == 0) WarnAboutDiscontinuity(
+                keyEntries[0] + " does not exist but was modified",
+                timestamp,
+                3
+            );
+            else {
+                USBFile file = files[keyEntries[0]];
+
+                if (file.fileHash != keyEntries[1]) WarnAboutDiscontinuity(
+                    keyEntries[0] + " has the wrong hash - it should have " + file.fileHash + " but has " + keyEntries[1],
+                    timestamp,
+                    3
+                );
+                if (file.fileSize != stoi(keyEntries[2])) WarnAboutDiscontinuity(
+                    keyEntries[0] + " has the wrong size - it should have " + to_string(file.fileSize) + " but has " + keyEntries[2],
+                    timestamp,
+                    3
+                );
+
+                file = {
+                    keyEntries[0],
+                    file.fileSize,
+                    file.fileHash,
+                };
+                files[keyEntries[0]] = file;
+            }
+        }
+
+        else if (actionType == 5) {
+            //Issue 1 - old name does not exist
+            //Issue 2 - name is a duplicate (these cannot exist at least on windows)
+
+            if (files.count(keyEntries[0]) == 0) WarnAboutDiscontinuity(
+                keyEntries[0] + " does not exit but was renamed",
+                timestamp,
+                5
+            );
+            else if (files.count(keyEntries[1]) == 1) WarnAboutDiscontinuity(
+                keyEntries[1] + " already exists but " + keyEntries[0] + " was renamed to it",
+                timestamp,
+                5
+            );
+            
+            else {
+                USBFile file = files[keyEntries[0]];
+                files.erase(keyEntries[0]);
+
+                files[keyEntries[1]] = file;
+            }
+        }
+    }
+
+    //Todo - scan the USB again and make sure the last update is in accordance with what currently exists
+}
+
 //Windows stuff
 vector<DEV_BROADCAST_DEVICEINTERFACE*> buffer = {};
 
@@ -1161,8 +1323,18 @@ int main() {
         cout << "Decrypting entries" << endl;
         vector<string> log = DecryptEntry(privateKey, logPath);
 
-        for (string entry : log) cout << "Entry : " << entry << endl;
+        cout << "Show log? : ";
+        cin >> inputBuffer;
+        cout << endl;
+        if (inputBuffer == "y" || inputBuffer == "Y") {
+            for (string entry : log) cout << FormatLogEntry(entry) << endl;
+        }
 
+        cout << "Search for discontinuities? : ";
+        cin >> inputBuffer;
+        cout << endl;
+
+        if (inputBuffer == "y" || inputBuffer == "Y") SearchForDiscontinuities(log);
     }
     else if (stoi(inputBuffer) == 3) {
         //USB Scanning Mode
