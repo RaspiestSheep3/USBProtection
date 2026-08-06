@@ -1045,13 +1045,15 @@ string FormatLogEntry(string rawEntry) {
     return out;
 }
 
-void WarnAboutDiscontinuity(string discontinuity, string formattedTimestamp, int actionType) {
+void WarnAboutDiscontinuity(string discontinuity, string formattedTimestamp, int actionType, bool showExtraInfo = true) {
     //Probably spelt wrong
-    cout << "Action type : " << to_string(actionType) << endl;
-    cout << "Discontinuity warning! : \n" << discontinuity << " (" << formattedTimestamp << ")" << endl;
+    if(showExtraInfo) cout << "Action type : " << to_string(actionType) << endl;
+    cout << "Discontinuity warning! : \n" << discontinuity;
+    if(showExtraInfo) cout << " (" << formattedTimestamp << ")";
+    cout << endl;
 }
 
-void SearchForDiscontinuities(vector<string> log) {
+void SearchForDiscontinuities(vector<string> log, string driveLetter) {
     //No clue how to spell this word, hopefully this is correct
     unordered_map<string, USBFile> files;
 
@@ -1181,6 +1183,100 @@ void SearchForDiscontinuities(vector<string> log) {
     }
 
     //Todo - scan the USB again and make sure the last update is in accordance with what currently exists
+    //See WatchUSB()
+
+    HANDLE hDir = CreateFileA(
+        driveLetter.c_str(),
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, // Let other programs still use it
+        NULL,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS, // Required for getting a handle to a directory
+        NULL
+    );
+
+    if (hDir == INVALID_HANDLE_VALUE) {
+        cout << "Failed to open directory." << endl;
+        return;
+    }
+
+    //First I want to note the existing situation
+    unordered_map<string, USBFile> usbFiles;
+
+    //BFS
+    vector<string> pathQueue = { driveLetter };
+    while (pathQueue.size() > 0) {
+        string path = pathQueue[0];
+        pathQueue.erase(pathQueue.begin());
+
+        for (const auto& entry : filesystem::directory_iterator(path)) {
+            if (filesystem::is_directory(entry.path())) {
+                pathQueue.push_back((entry.path()).string());
+                //cout << "Directory : " << entry.path() << endl;
+
+            }
+            else if (filesystem::is_regular_file(entry.path())) {
+                cout << "File : " << entry.path() << endl;
+
+                unsigned char out[MD5_DIGEST_LENGTH];
+
+                MD5FromFile((entry.path()).string(), out);
+                string md5 = BytesToHex(out, MD5_DIGEST_LENGTH);
+
+                USBFile usb{
+                    (entry.path()).string(),
+                    filesystem::file_size(entry.path()),
+                    md5
+                };
+
+                usbFiles[usb.name] = usb;
+
+            }
+            else cout << "Other? : " << entry.path() << endl;
+        }
+    }
+
+    //New code
+    //We need to compare every entry
+    vector<string> processedEntries = {};
+    for (auto pair : files) {
+        processedEntries.push_back(pair.first);
+
+        if (usbFiles.count(pair.first) == 0) WarnAboutDiscontinuity(
+            pair.first + " exists in the logs but not on the USB now",
+            "",
+            0,
+            false
+        );
+        else {
+            USBFile loggedFile = pair.second;
+            USBFile currentFile = usbFiles[pair.first];
+
+            if(loggedFile.fileHash != currentFile.fileHash) WarnAboutDiscontinuity(
+                loggedFile.name + " has logged hash = " + loggedFile.fileHash + " but hash = " + currentFile.fileHash + " on the USB now",
+                "",
+                0,
+                false
+            );
+
+            if (loggedFile.fileSize != currentFile.fileSize) WarnAboutDiscontinuity(
+                loggedFile.name + " has logged size = " + to_string(loggedFile.fileSize) + "B but size = " + to_string(currentFile.fileSize) + "B on the USB now",
+                "",
+                0,
+                false
+            );
+        }
+    }
+
+    //Making sure we've dealth with everything
+    for (auto pair : usbFiles) {
+        if (find(processedEntries.begin(), processedEntries.end(), pair.first) == processedEntries.end()) WarnAboutDiscontinuity(
+            pair.first + " should not currently exist according to the logs but does on the USB now",
+            "",
+            0,
+            false
+        );
+    }
 }
 
 //Windows stuff
@@ -1334,7 +1430,7 @@ int main() {
         cin >> inputBuffer;
         cout << endl;
 
-        if (inputBuffer == "y" || inputBuffer == "Y") SearchForDiscontinuities(log);
+        if (inputBuffer == "y" || inputBuffer == "Y") SearchForDiscontinuities(log, logPath.substr(0,3));
     }
     else if (stoi(inputBuffer) == 3) {
         //USB Scanning Mode
