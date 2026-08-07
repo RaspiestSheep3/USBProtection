@@ -48,7 +48,7 @@ struct USBStatus {
 struct USBFile {
     string name = "";
     uint64_t fileSize = 0;
-    string fileHash = "d41d8cd98f00b204e9800998ecf8427e"; //This is the hash for nothing under MD5
+    string fileHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; //This is the hash for nothing under SHA256
 };
 
 //System settings
@@ -231,8 +231,7 @@ vector<unsigned char> HexToBytes(const string& hexStr) {
     return bytes;
 }
 
-//Adapated from https://www.geeksforgeeks.org/cpp/get-the-md5-hash-of-a-file-in-cpp/
-void MD5FromFile(const string &filePath, unsigned char* out) {
+void SHA256FromFile(const string &filePath, unsigned char* out) {
     ifstream file(filePath, ios::in | ios::binary | ios::ate);
 
     if (!file.is_open()) {
@@ -252,14 +251,16 @@ void MD5FromFile(const string &filePath, unsigned char* out) {
     file.read(memBlock, fileSize);
     file.close();
 
-    // Compute the MD5 hash of the file content
-    MD5((unsigned char*)memBlock, fileSize, out);
+    // Compute the SHA hash of the file content
+    string hash = sha256(string(memBlock));
 
+    out = (unsigned char*) hash.c_str();
+    
     // Clean up
     delete[] memBlock;
 }
 
-string ProcessMD5(unsigned char* md, long size = MD5_DIGEST_LENGTH) {
+string ProcessSHA256(unsigned char* md, long size = SHA256_DIGEST_LENGTH) {
     string out = "";
     for (int i = 0; i < size; i++) {
         cout << hex << setw(2) << setfill('0') << (int)md[i];
@@ -652,15 +653,15 @@ void WatchUSB(string driveLetter) {
             else if (filesystem::is_regular_file(entry.path())) {
                 cout << "File : " << entry.path() << endl;
                 
-                unsigned char out[MD5_DIGEST_LENGTH];
+                unsigned char out[SHA256_DIGEST_LENGTH];
 
-                MD5FromFile((entry.path()).string(), out);
-                string md5 = BytesToHex(out, MD5_DIGEST_LENGTH);
+                SHA256FromFile((entry.path()).string(), out);
+                string sha = BytesToHex(out, SHA256_DIGEST_LENGTH);
 
                 USBFile usb{
                     (entry.path()).string(),
                     filesystem::file_size(entry.path()),
-                    md5
+                    sha
                 };
 
                 usbFiles[usb.name] = usb;
@@ -670,7 +671,7 @@ void WatchUSB(string driveLetter) {
         }
     }
 
-    char buffer[1024];
+    char buffer[8192];
     DWORD bytesReturned;
 
     OVERLAPPED overlapped = {};
@@ -722,10 +723,10 @@ void WatchUSB(string driveLetter) {
                     unencryptedBaseEntry = '?' + fileName + "? was created | Action Type 1";
                     entry.name = fileName;
 
-                    unsigned char out[MD5_DIGEST_LENGTH];
-                    MD5FromFile(fileName, out);
-                    string newMD5 = BytesToHex(out, MD5_DIGEST_LENGTH);
-                    entry.fileHash = newMD5;
+                    unsigned char out[SHA256_DIGEST_LENGTH];
+                    SHA256FromFile(fileName, out);
+                    string newSHA = BytesToHex(out, SHA256_DIGEST_LENGTH);
+                    entry.fileHash = newSHA;
                     
                     usbFiles[fileName] = entry;
                 }
@@ -739,16 +740,16 @@ void WatchUSB(string driveLetter) {
                     string oldHash = entry.fileHash;
 
                     uint64_t newSize = filesystem::file_size(fileName);
-                    unsigned char out[MD5_DIGEST_LENGTH];
-                    MD5FromFile(fileName, out);
-                    string newMD5 = BytesToHex(out, MD5_DIGEST_LENGTH);
+                    unsigned char out[SHA256_DIGEST_LENGTH];
+                    SHA256FromFile(fileName, out);
+                    string newSHA = BytesToHex(out, SHA256_DIGEST_LENGTH);
 
-                    entry.fileHash = newMD5;
+                    entry.fileHash = newSHA;
                     entry.fileSize = newSize;
 
                     usbFiles[fileName] = entry;
 
-                    unencryptedBaseEntry = "?" + fileName + "? was modified (old hash = ?" + oldHash + "?, old size = ?" + to_string(oldSize) + "?B, new hash = ?" + newMD5 + "?, new size = ?" + to_string(newSize) + "?B) | Action Type 3";
+                    unencryptedBaseEntry = "?" + fileName + "? was modified (old hash = ?" + oldHash + "?, old size = ?" + to_string(oldSize) + "?B, new hash = ?" + newSHA + "?, new size = ?" + to_string(newSize) + "?B) | Action Type 3";
                 }
                 else if (action == 4) {
                     action4OldNameBuffer = fileName;
@@ -841,11 +842,17 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
         }
         fSig.close();
 
-        //Check 1 - is the hash correct
         bool shouldContinue = true;
+
+        if (i != 6) {
+            cout << "Signature too short / malformed" << endl;
+            shouldContinue = false;
+        }
+
+        //Check 1 - is the hash correct
         string combinedNoHash = signatureBuffer[1] + signatureBuffer[2] + signatureBuffer[3] + signatureBuffer[4];
         string hash = sha256(combinedNoHash);
-        if (hash != signatureBuffer[0]) {
+        if (shouldContinue && hash != signatureBuffer[0]) {
             cout << "Hashes do not align" << endl;
             shouldContinue = false;
         }
@@ -1125,7 +1132,7 @@ void SearchForDiscontinuities(vector<string> log, string driveLetter) {
                 USBFile newEntry = {
                     keyEntries[0],
                     0,
-                    "d41d8cd98f00b204e9800998ecf8427e"
+                    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                 };
 
                 files[keyEntries[0]] = newEntry;
@@ -1251,15 +1258,15 @@ void SearchForDiscontinuities(vector<string> log, string driveLetter) {
             else if (filesystem::is_regular_file(entry.path())) {
                 cout << "File : " << entry.path() << endl;
 
-                unsigned char out[MD5_DIGEST_LENGTH];
+                unsigned char out[SHA256_DIGEST_LENGTH];
 
-                MD5FromFile((entry.path()).string(), out);
-                string md5 = BytesToHex(out, MD5_DIGEST_LENGTH);
+                SHA256FromFile((entry.path()).string(), out);
+                string sha = BytesToHex(out, SHA256_DIGEST_LENGTH);
 
                 USBFile usb{
                     (entry.path()).string(),
                     filesystem::file_size(entry.path()),
-                    md5
+                    sha
                 };
 
                 usbFiles[usb.name] = usb;

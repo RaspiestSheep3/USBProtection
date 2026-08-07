@@ -4,9 +4,15 @@
 - Log changes in a USB log file - DONE
 - When making the signature intialise the log
 - Read the log in boot mode 2 - DONE
-    - Build a system to check for inconsistencies - ONGOING
+    - Build a system to check for inconsistencies - DONE
     - In discontinuity checker do another scan and measure against last log - DONE
 - Make a way to be able to take out the USB without having to close the program - DONE
+- In mode 1 initialise the log
+- In mode 2 ignore strangeness within the log file
+- Minor improvements - DONE
+    - Use SHA instead of MD5 - DONE
+    - Reject empty .sig file - DONE
+    - Increase read directory buffer size - 8x - DONE
 - Clean up output
 - Do final checks
 
