@@ -28,4 +28,5 @@
 #include <openssl/md5.h>
 #include <filesystem>
 #include <unordered_map>
+#include <atomic>
 #pragma comment (lib, "cfgmgr32.lib")

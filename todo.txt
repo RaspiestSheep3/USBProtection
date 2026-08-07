@@ -6,7 +6,7 @@
 - Read the log in boot mode 2 - DONE
     - Build a system to check for inconsistencies - ONGOING
     - In discontinuity checker do another scan and measure against last log - DONE
-- Make a way to be able to take out the USB without having to close the program
+- Make a way to be able to take out the USB without having to close the program - DONE
 - Clean up output
 - Do final checks
 

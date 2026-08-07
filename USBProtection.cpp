@@ -58,6 +58,11 @@ string knownKeypairsPath;
 uint8_t systemMode;
 ASTNode root;
 bool shouldLearnNewDevices = false;
+//Threading stuff - AI
+HANDLE g_hUSBDir = INVALID_HANDLE_VALUE;
+atomic<bool> g_keepWatching(false);
+HWND g_hwnd = NULL;
+HDEVNOTIFY g_hHandleNotify = NULL;
 
 //Helpers
 string GenerateSubstr(string str, char start, char end) {
@@ -606,20 +611,28 @@ void WatchUSB(string driveLetter) {
     cout << "Watching : " << driveLetter << endl;
     
     //Windows stuff is AI
-    HANDLE hDir = CreateFileA(
+    g_hUSBDir = CreateFileA(
         driveLetter.c_str(),
         FILE_LIST_DIRECTORY,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, // Let other programs still use it
         NULL,
         OPEN_EXISTING,
-        FILE_FLAG_BACKUP_SEMANTICS, // Required for getting a handle to a directory
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, // Required for getting a handle to a directory
         NULL
     );
 
-    if (hDir == INVALID_HANDLE_VALUE) {
+    if (g_hUSBDir == INVALID_HANDLE_VALUE) {
         cout << "Failed to open directory." << endl;
         return;
     }
+
+    DEV_BROADCAST_HANDLE filter = {};
+    filter.dbch_size = sizeof(filter);
+    filter.dbch_devicetype = DBT_DEVTYP_HANDLE;
+    filter.dbch_handle = g_hUSBDir;
+    g_hHandleNotify = RegisterDeviceNotification(g_hwnd, &filter, DEVICE_NOTIFY_WINDOW_HANDLE);
+
+    g_keepWatching = true;
 
     //First I want to note the existing situation
     unordered_map<string, USBFile> usbFiles;
@@ -660,22 +673,28 @@ void WatchUSB(string driveLetter) {
     char buffer[1024];
     DWORD bytesReturned;
 
+    OVERLAPPED overlapped = {};
+    overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+
     cout << "Watching for changes..." << endl;
 
-    // 2. This function will BLOCK (freeze the thread) until a change happens
-    while (true) { //This loop means we infinetly accept events
-        bool success = ReadDirectoryChangesW(
-            hDir,
-            &buffer,
+    while (g_keepWatching) { 
+        bool queued = ReadDirectoryChangesW(
+            g_hUSBDir,
+            buffer,
             sizeof(buffer),
             TRUE, // Watch all subfolders too
             FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
-            &bytesReturned,
             NULL,
+            &overlapped,
             NULL
         );
 
-        if (success) {
+        if (!queued) break;
+        
+        bool success = GetOverlappedResult(g_hUSBDir, &overlapped, &bytesReturned, TRUE);
+
+        if (success && bytesReturned > 0) {
             cout << "A file was created, modified, or deleted on the USB!" << endl;
             FILE_NOTIFY_INFORMATION* notifyInfo = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer);
             
@@ -759,10 +778,22 @@ void WatchUSB(string driveLetter) {
                 }
             }
         }
+        else {
+            cout << "USB removed" << endl;
+            break;
+        }
+
+        ResetEvent(overlapped.hEvent);
         
     }
 
-    CloseHandle(hDir);
+    if (overlapped.hEvent) CloseHandle(overlapped.hEvent);
+
+    if (g_hUSBDir != INVALID_HANDLE_VALUE) {
+        CloseHandle(g_hUSBDir);
+        g_hUSBDir = INVALID_HANDLE_VALUE;
+    }
+    g_keepWatching = false;
 }
 
 void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWriteDev) {
@@ -964,7 +995,9 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
 
     if (!ejected) {
         //Watching USBs
-        WatchUSB((string() + volLetter) + ":\\");
+        string targetDrive = (string() + volLetter) + ":\\";
+        thread watchThread(WatchUSB, targetDrive);
+        watchThread.detach();
     }
 }
 
@@ -1287,58 +1320,93 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
         PDEV_BROADCAST_HDR lpHdr = (PDEV_BROADCAST_HDR)lParam;
 
         switch (wParam) {
-        case DBT_DEVICEARRIVAL: //USB was plugged in
-           cout << "[+] A device was plugged in! ";
-            /*
-            We have an issue here where the VOLUME send is sent after the INTERFACE one
-            However, for my headphones it only sends the INTERFACE, so ew can't wire HandleUSB up to the VOLUME
-            The current soloutin is to use a buffer
-            */
+            case DBT_DEVICEARRIVAL: //USB was plugged in
+               cout << "[+] A device was plugged in! ";
+                /*
+                We have an issue here where the VOLUME send is sent after the INTERFACE one
+                However, for my headphones it only sends the INTERFACE, so ew can't wire HandleUSB up to the VOLUME
+                The current soloutin is to use a buffer
+                */
 
-            if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_VOLUME) {
-                cout << "Test fire" << endl;
-                auto readWriteDev = ((DEV_BROADCAST_VOLUME*)lpHdr);
-                DEV_BROADCAST_DEVICEINTERFACE* dev = buffer[0];
-                buffer.erase(buffer.begin());
+                if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_VOLUME) {
+                    cout << "Test fire" << endl;
+                    auto readWriteDev = ((DEV_BROADCAST_VOLUME*)lpHdr);
+                    DEV_BROADCAST_DEVICEINTERFACE* dev = buffer[0];
+                    buffer.erase(buffer.begin());
 
-                HandleUSB(dev, readWriteDev);
-            }
+                    HandleUSB(dev, readWriteDev);
+                }
 
-            else if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) { //DBT describes plug-and-play stuff
-                cout << "(USB Interface Detected)\n";
+                else if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) { //DBT describes plug-and-play stuff
+                    cout << "(USB Interface Detected)\n";
             
-                auto dev = ((DEV_BROADCAST_DEVICEINTERFACE*)lpHdr);
+                    auto dev = ((DEV_BROADCAST_DEVICEINTERFACE*)lpHdr);
                 
-                uint64_t bufferInt[3] = { 0 };
-                string bufferStr[3];
-                DBCCParser(bufferInt, bufferStr, dev->dbcc_name);
+                    uint64_t bufferInt[3] = { 0 };
+                    string bufferStr[3];
+                    DBCCParser(bufferInt, bufferStr, dev->dbcc_name);
 
-                string VID = bufferStr[0];
-                string PID = bufferStr[1];
-                string serial = bufferStr[2];
+                    string VID = bufferStr[0];
+                    string PID = bufferStr[1];
+                    string serial = bufferStr[2];
 
-                string formattedID = "USB\\VID_" + VID + "&PID_" + PID + "\\" + serial;
-                bool isReadWrite = IsReadWrite(formattedID);
-                cout << "Is read write : " << isReadWrite << endl;
-                if (isReadWrite) buffer.push_back(dev);
-                else HandleUSB(dev, nullptr);
-            }
-            else {
-                cout << "\n";
-            }
+                    string formattedID = "USB\\VID_" + VID + "&PID_" + PID + "\\" + serial;
+                    bool isReadWrite = IsReadWrite(formattedID);
+                    cout << "Is read write : " << isReadWrite << endl;
+                    if (isReadWrite) buffer.push_back(dev);
+                    else HandleUSB(dev, nullptr);
+                }
+                else {
+                    cout << "\n";
+                }
 
-            break;
+                break;
 
+            //AI
+            case DBT_DEVICEQUERYREMOVE:
+                // Check if the ejection request is specifically for our registered Handle
+                if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_HANDLE) {
+                    cout << "[*] Ejection requested by user!" << endl;
+                    g_keepWatching = false;
 
-        case DBT_DEVICEREMOVECOMPLETE: //USB removed
-            cout << "[-] A device was removed! ";
-            if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
-                cout << "(USB Interface Disconnected)\n";
-            }
-            else {
-                cout << "\n";
-            }
-            break;
+                    // Unregister the handle notification
+                    if (g_hHandleNotify) {
+                        UnregisterDeviceNotification(g_hHandleNotify);
+                        g_hHandleNotify = NULL;
+                    }
+
+                    // Abort IO and release the drive!
+                    if (g_hUSBDir != INVALID_HANDLE_VALUE) {
+                        CancelIoEx(g_hUSBDir, NULL);
+                        CloseHandle(g_hUSBDir);
+                        g_hUSBDir = INVALID_HANDLE_VALUE;
+                        cout << "[*] Released USB handle to allow ejection." << endl;
+                    }
+                }
+                return TRUE; // ALWAYS return TRUE to grant the ejection
+
+            case DBT_DEVICEREMOVECOMPLETE: //USB physically yanked out
+                cout << "[-] A device was removed! ";
+                if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
+                    cout << "(USB Interface Disconnected)\n";
+                }
+                else {
+                    cout << "\n";
+                }
+
+                g_keepWatching = false;
+
+                if (g_hHandleNotify) {
+                    UnregisterDeviceNotification(g_hHandleNotify);
+                    g_hHandleNotify = NULL;
+                }
+
+                if (g_hUSBDir != INVALID_HANDLE_VALUE) {
+                    CancelIoEx(g_hUSBDir, NULL);
+                    CloseHandle(g_hUSBDir);
+                    g_hUSBDir = INVALID_HANDLE_VALUE;
+                }
+                break;
         }
     }
     return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -1509,6 +1577,8 @@ int main() {
             NULL,
             NULL, NULL, NULL
         );
+
+        g_hwnd = hwnd;
 
         if (!hwnd) {
             cerr << "Failed to create background message window.\n";
