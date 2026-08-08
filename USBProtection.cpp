@@ -91,7 +91,7 @@ void DBCCParser(uint64_t* bufferInt, string* bufferStr, string dbcc) {
     bufferStr[1] = PID;
     bufferStr[2] = serial;
 
-    cout << "VID : " << VID << "\nPID : " << PID << "\nSerial : " << serial << endl;
+    //cout << "VID : " << VID << "\nPID : " << PID << "\nSerial : " << serial << endl;
 
     bufferInt[0] = stoull(VID, 0, 16);
     bufferInt[1] = stoull(PID, 0, 16);
@@ -241,7 +241,7 @@ string SHA256FromFile(const string &filePath) {
 
     // Get file size
     long fileSize = file.tellg();
-    cout << "File size: " << fileSize << " bytes" << endl;
+    //cout << "File size: " << fileSize << " bytes" << endl;
 
     // Allocate memory to hold the entire file
     char* memBlock = new char[fileSize];
@@ -257,16 +257,6 @@ string SHA256FromFile(const string &filePath) {
     delete[] memBlock;
 
     return hash;
-}
-
-string ProcessSHA256(unsigned char* md, long size = SHA256_DIGEST_LENGTH) {
-    string out = "";
-    for (int i = 0; i < size; i++) {
-        cout << hex << setw(2) << setfill('0') << (int)md[i];
-    }
-    cout << dec << endl;
-
-    return out;
 }
 
 void WriteEncryptedLogEntry(string entry, string driveLetter) {
@@ -304,7 +294,7 @@ vector<string> DecryptEntry(RSA* privKey, string filePath) {
     vector<string> out = {};
 
     if (privKey == nullptr) {
-        cout << "pviv key nullptr" << endl;
+        //cout << "pviv key nullptr" << endl;
         return out;
     }
 
@@ -326,7 +316,7 @@ vector<string> DecryptEntry(RSA* privKey, string filePath) {
         );
 
         if (decryptedLength == -1) {
-            cout << "Length = -1" << endl;
+            //cout << "Length = -1" << endl;
             return out;
         }
 
@@ -346,12 +336,12 @@ vector<string> DecryptEntry(RSA* privKey, string filePath) {
 
 //functions
 void FormASTTreeLayer(ASTNode* node, vector<string> scope) {
-    cout << "============" << endl;
-    cout << "Forming AST Layer" << endl;
+    //cout << "============" << endl;
+    //cout << "Forming AST Layer" << endl;
 
-    cout << "Scope size : " << scope.size() << endl;
-    cout << "Scope : " << endl;
-    for (string line : scope) cout << line << endl;
+    //cout << "Scope size : " << scope.size() << endl;
+    //cout << "Scope : " << endl;
+    //for (string line : scope) cout << line << endl;
     
     /*We can say a scope has either an IF / ELSE setup or not
     If it does, we need to consider the IF/ELSE pair together
@@ -382,10 +372,10 @@ void FormASTTreeLayer(ASTNode* node, vector<string> scope) {
         };
 
         //Visualising the condition
-        cout << "Condition : " << endl;
-        cout << "Type : " << to_string(node->condition->type) << endl;
-        cout << "RHS : " << node->condition->RHS << endl;
-        cout << "Sign : " << node->condition->sign << endl;
+        //cout << "Condition : " << endl;
+        //cout << "Type : " << to_string(node->condition->type) << endl;
+        //cout << "RHS : " << node->condition->RHS << endl;
+        //cout << "Sign : " << node->condition->sign << endl;
 
         //Counting out the IF scope using depths
         uint64_t scopeDepth = 1;
@@ -397,14 +387,14 @@ void FormASTTreeLayer(ASTNode* node, vector<string> scope) {
             if (scopeDepth == 0) break;
             ifScope.push_back(scope[i]);
 
-            cout << "IF Scope Section : " << scope[i] << endl;
+            //cout << "IF Scope Section : " << scope[i] << endl;
             ifBlockEnd++;
         }
 
         node->ifBlock = new ASTNode();
         FormASTTreeLayer(node->ifBlock, ifScope);
 
-        cout << "IF Block end " << ifBlockEnd << endl;
+        //cout << "IF Block end " << ifBlockEnd << endl;
 
         //EL will not always exist - we first need to work out if it exists 
         if ((scope.size() > ifBlockEnd + 1) && (scope[ifBlockEnd + 1].substr(0, 2) == "EL")) {
@@ -417,7 +407,7 @@ void FormASTTreeLayer(ASTNode* node, vector<string> scope) {
                 if (scopeDepth == 0) break;
                 elScope.push_back(scope[i]);
 
-                cout << "EL Scope Section : " << scope[i] << endl;
+                //cout << "EL Scope Section : " << scope[i] << endl;
             }
 
             node->elseBlock = new ASTNode();
@@ -426,17 +416,17 @@ void FormASTTreeLayer(ASTNode* node, vector<string> scope) {
     }
     else {
         //In this case we are dealing with an ALLOW/REQUETS/DENY sitauton
-        cout << "ALLOW Scope : " << scope[0] << endl;
+        //cout << "ALLOW Scope : " << scope[0] << endl;
         if (scope[0] == ":ALLOW:") node->allowCode = 1;
         else if (scope[0] == ":REQUEST:") node->allowCode = 2;
         else node->allowCode = 3;
     }
 
-    cout << "-------" << endl;
+    //cout << "-------" << endl;
 }
 
 bool CheckCondition(Condition* condition, USBStatus* status) {
-    cout << "Checking Condition of type " << to_string(condition->type) << endl;
+    //cout << "Checking Condition of type " << to_string(condition->type) << endl;
 
     if (condition->type == 1) {
         //Owner 
@@ -483,15 +473,15 @@ bool CheckCondition(Condition* condition, USBStatus* status) {
 }
 
 uint8_t NodePolicyCheck(USBStatus* status, ASTNode* node) {
-    cout << "---" << endl;
-    cout << "Node Policy Check" << endl;
-    cout << "Node overview :" << endl;
-    cout << "Node : " << (node != nullptr) << endl;
+    //cout << "---" << endl;
+    //cout << "Node Policy Check" << endl;
+    //cout << "Node overview :" << endl;
+    //cout << "Node : " << (node != nullptr) << endl;
     if (node == nullptr) throw 1000;
-    cout << "Condition : " << (node->condition != nullptr) << endl;
-    cout << "IF block : " << (node->ifBlock != nullptr) << endl;
-    cout << "EL block : " << (node->elseBlock != nullptr) << endl;
-    cout << "Allow Code : " << to_string(node->allowCode) << endl;
+    //cout << "Condition : " << (node->condition != nullptr) << endl;
+    //cout << "IF block : " << (node->ifBlock != nullptr) << endl;
+    //cout << "EL block : " << (node->elseBlock != nullptr) << endl;
+    //cout << "Allow Code : " << to_string(node->allowCode) << endl;
     uint8_t out = 0; //Safer to assume invalid unless proved otherwise
     
     try {
@@ -525,18 +515,18 @@ uint8_t DoesUSBMatchPolicy(USBStatus* status, ASTNode* rootNode) {
     */
     uint8_t out = 0;
 
-    cout << "Step 1 complete" << endl;
+    //cout << "Step 1 complete" << endl;
 
     out = NodePolicyCheck(status, rootNode);
     if (out == 0) out = 3; //Safest to deny unless states otehrwise
-    cout << "Policy Check results : " << to_string(out) << endl;
+    //cout << "Policy Check results : " << to_string(out) << endl;
 
     return out;
 }
 
 void EjectUSB(string formattedID) {
     //Format goal - USB\VID_1234&PID_5678\SERIAL
-    cout << "Formatted ID : " << formattedID << endl;
+    //cout << "Formatted ID : " << formattedID << endl;
 
     //Gemini, not me
     DEVINST devInst;
@@ -550,11 +540,11 @@ void EjectUSB(string formattedID) {
         cr = CM_Request_Device_EjectA(devInst, &vetoType, vetoName, MAX_PATH, 0);
 
         if (cr == CR_SUCCESS) {
-            cout << "[+] Device safely ejected due to policy violation." << endl;
+            //cout << "[+] Device safely ejected due to policy violation." << endl;
         }
         else {
             // A "veto" means Windows blocked the ejection (e.g., a file is currently open)
-            cout << "[-] Failed to eject device. Windows Veto Type: " << vetoType << endl;
+            //cout << "[-] Failed to eject device. Windows Veto Type: " << vetoType << endl;
         }
     }
     else cout << "Not found " << endl;
@@ -608,7 +598,7 @@ bool RSAVerify(RSA* rsa, const unsigned char* Msg, size_t MsgLen, const unsigned
 }
 
 void WatchUSB(string driveLetter) {
-    cout << "Watching : " << driveLetter << endl;
+    //cout << "Watching : " << driveLetter << endl;
     
     //Windows stuff is AI
     g_hUSBDir = CreateFileA(
@@ -622,7 +612,7 @@ void WatchUSB(string driveLetter) {
     );
 
     if (g_hUSBDir == INVALID_HANDLE_VALUE) {
-        cout << "Failed to open directory." << endl;
+        //cout << "Failed to open directory." << endl;
         return;
     }
 
@@ -650,7 +640,7 @@ void WatchUSB(string driveLetter) {
 
             }
             else if (filesystem::is_regular_file(entry.path())) {
-                cout << "File : " << entry.path() << endl;
+                //cout << "File : " << entry.path() << endl;
                 
                 string sha = SHA256FromFile((entry.path()).string());
 
@@ -673,7 +663,7 @@ void WatchUSB(string driveLetter) {
     OVERLAPPED overlapped = {};
     overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-    cout << "Watching for changes..." << endl;
+    //cout << "Watching for changes..." << endl;
 
     while (g_keepWatching) { 
         bool queued = ReadDirectoryChangesW(
@@ -692,7 +682,7 @@ void WatchUSB(string driveLetter) {
         bool success = GetOverlappedResult(g_hUSBDir, &overlapped, &bytesReturned, TRUE);
 
         if (success && bytesReturned > 0) {
-            cout << "A file was created, modified, or deleted on the USB!" << endl;
+            //cout << "A file was created, modified, or deleted on the USB!" << endl;
             FILE_NOTIFY_INFORMATION* notifyInfo = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer);
             
             string action4OldNameBuffer = "";
@@ -701,18 +691,18 @@ void WatchUSB(string driveLetter) {
                 wstring wstr(notifyInfo->FileName, characterCount);
                 string fileName(wstr.begin(), wstr.end());
                 if (fileName == "usb.log") {
-                    cout << "Log edit - breaking";
+                    //cout << "Log edit - breaking";
                     break; //Otherwise we'll end up in an infinite
                 }
                 fileName = driveLetter + fileName;
 
-                cout << "File name : " << fileName << endl;
+                //cout << "File name : " << fileName << endl;
                 DWORD action = notifyInfo->Action;
 
                 USBFile entry = usbFiles[fileName];
                 string unencryptedBaseEntry;
 
-                cout << "Action : " << to_string(action) << endl;
+                //cout << "Action : " << to_string(action) << endl;
 
                 //NTS - https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-file_notify_information
                 if (action == 1) {
@@ -755,13 +745,13 @@ void WatchUSB(string driveLetter) {
                 else cout << "Unprocessed action : " << to_string(action) << endl;
                 
                 if (unencryptedBaseEntry != "") {
-                    cout << "Entry : " << unencryptedBaseEntry << endl;
+                    //cout << "Entry : " << unencryptedBaseEntry << endl;
                     WriteEncryptedLogEntry(unencryptedBaseEntry, driveLetter);
                 }
                 
                 //The notify can hold multiple events, so we have to make sure w eget each one
                 if (notifyInfo->NextEntryOffset == 0) {
-                    cout << "Event complete" << endl;
+                    //cout << "Event complete" << endl;
                     break;
                 }
                 else {
@@ -772,7 +762,7 @@ void WatchUSB(string driveLetter) {
             }
         }
         else {
-            cout << "USB removed" << endl;
+            //cout << "USB removed" << endl;
             break;
         }
 
@@ -790,7 +780,7 @@ void WatchUSB(string driveLetter) {
 }
 
 void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWriteDev) {
-    cout << "DBCC NAME : " << dev->dbcc_name << endl;
+    //cout << "DBCC NAME : " << dev->dbcc_name << endl;
     uint64_t bufferInt[3] = { 0 };
     string bufferStr[3];
     DBCCParser(bufferInt, bufferStr, dev->dbcc_name);
@@ -805,7 +795,7 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
 
     if (readWriteDev != nullptr) {
         //We can try read the read write storage thing
-        cout << "Attempting to read device owner" << endl;
+        //cout << "Attempting to read device owner" << endl;
         DWORD unitMask = readWriteDev->dbcv_unitmask;
         volLetter = 'A';
 
@@ -817,9 +807,9 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
             }
         }
 
-        cout << "Vol letter : " << volLetter << endl;
+        //cout << "Vol letter : " << volLetter << endl;
         string signaturePath = string(1, volLetter) + ":\\signature.sig";
-        cout << "Signature path : " << signaturePath << endl;
+        //cout << "Signature path : " << signaturePath << endl;
 
         //Signature verification
         ifstream fSig;
@@ -862,7 +852,7 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
         if (shouldContinue) {
             string ownerPublicKeyPath = knownKeypairsPath + "\\" + signatureBuffer[1] + ".pem";
 
-            cout << "Looking for " << signatureBuffer[1] << " @ " << ownerPublicKeyPath << endl;
+            //cout << "Looking for " << signatureBuffer[1] << " @ " << ownerPublicKeyPath << endl;
 
             //2.1 - do we know the keypair - if not we can tret it as unknown
             ifstream ownerPublicKeyPem(ownerPublicKeyPath);
@@ -874,7 +864,7 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
                 RSA *ownerPublic = RSA_new();
                 ownerPublic = LoadPublicKey(ownerPublicKeyPath, "");
                 cout << "Carrying out verification - testing" << endl;
-                cout << "Is owner public nullptr : " << (ownerPublic == nullptr) << endl;
+                //cout << "Is owner public nullptr : " << (ownerPublic == nullptr) << endl;
 
                 //2.2 - Is the signature correct
                 string combinedWithHash = hash + combinedNoHash;
@@ -888,7 +878,7 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
                     signatureBytes.size()
                 );
 
-                cout << "Verification result " << verified << endl;
+                //cout << "Verification result " << verified << endl;
                 shouldContinue = verified;
             }
             ownerPublicKeyPem.close();
@@ -925,7 +915,7 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
             //We know this device already
             name = fileBuffer.substr(24, string::npos);
 
-            cout << "Name : " << name << endl;
+            //cout << "Name : " << name << endl;
             break;
         }
     }
@@ -960,7 +950,7 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
     };
 
     uint8_t result = DoesUSBMatchPolicy(&usbStatus, &root);
-    cout << "Policy Result : " << to_string(result) << endl;
+    //cout << "Policy Result : " << to_string(result) << endl;
 
     bool ejected = false;
 
@@ -987,7 +977,7 @@ void HandleUSB(DEV_BROADCAST_DEVICEINTERFACE* dev, DEV_BROADCAST_VOLUME* readWri
         }
     }
     else if (result == 3) {
-        cout << "Denial" << endl;
+        //cout << "Denial" << endl;
         EjectUSB(formattedID);
         ejected = true;
     }
@@ -1016,7 +1006,7 @@ void GenerateSignature(RSA*& keypair, string* signatureInfo, string folderPath) 
     string combinedNoHash = signatureInfo[0] + signatureInfo[1] + signatureInfo[2] + signatureInfo[3];
 
     string hash = sha256(combinedNoHash);
-    cout << "Hash : " << hash << endl;
+    //cout << "Hash : " << hash << endl;
 
     string combinedWithHash = hash + combinedNoHash;
 
@@ -1072,7 +1062,7 @@ void GenerateSignature(RSA*& keypair, string* signatureInfo, string folderPath) 
             else if (filesystem::is_regular_file(entry.path())) {
                 if (entry.path() == folderPath + "/usb.log") continue;
 
-                cout << "File : " << entry.path() << endl;
+                //cout << "File : " << entry.path() << endl;
 
                 string sha = SHA256FromFile((entry.path()).string());
 
@@ -1131,7 +1121,7 @@ string FormatLogEntry(string rawEntry) {
 
 void WarnAboutDiscontinuity(string discontinuity, string formattedTimestamp, int actionType, bool showExtraInfo = true) {
     //Probably spelt wrong
-    if(showExtraInfo) cout << "Action type : " << to_string(actionType) << endl;
+    //if(showExtraInfo) cout << "Action type : " << to_string(actionType) << endl;
     cout << "Discontinuity warning! : \n" << discontinuity;
     if(showExtraInfo) cout << " (" << formattedTimestamp << ")";
     cout << endl;
@@ -1141,7 +1131,7 @@ void SearchForDiscontinuities(vector<string> log, string driveLetter) {
     //No clue how to spell this word, hopefully this is correct
     unordered_map<string, USBFile> files;
 
-    cout << log.size() << endl;
+    //cout << log.size() << endl;
 
     for (string entry : log) {
         //Step 1 - find the action type
@@ -1300,7 +1290,7 @@ void SearchForDiscontinuities(vector<string> log, string driveLetter) {
 
             }
             else if (filesystem::is_regular_file(entry.path())) {
-                cout << "File : " << entry.path() << endl;
+                //cout << "File : " << entry.path() << endl;
 
                 string sha = SHA256FromFile((entry.path()).string());
 
@@ -1373,7 +1363,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
 
         switch (wParam) {
             case DBT_DEVICEARRIVAL: //USB was plugged in
-               cout << "[+] A device was plugged in! ";
+               //cout << "[+] A device was plugged in! ";
                 /*
                 We have an issue here where the VOLUME send is sent after the INTERFACE one
                 However, for my headphones it only sends the INTERFACE, so ew can't wire HandleUSB up to the VOLUME
@@ -1381,7 +1371,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
                 */
 
                 if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_VOLUME) {
-                    cout << "Test fire" << endl;
+                    //cout << "Test fire" << endl;
                     auto readWriteDev = ((DEV_BROADCAST_VOLUME*)lpHdr);
                     DEV_BROADCAST_DEVICEINTERFACE* dev = buffer[0];
                     buffer.erase(buffer.begin());
@@ -1390,7 +1380,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
                 }
 
                 else if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) { //DBT describes plug-and-play stuff
-                    cout << "(USB Interface Detected)\n";
+                    //cout << "(USB Interface Detected)\n";
             
                     auto dev = ((DEV_BROADCAST_DEVICEINTERFACE*)lpHdr);
                 
@@ -1404,12 +1394,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
 
                     string formattedID = "USB\\VID_" + VID + "&PID_" + PID + "\\" + serial;
                     bool isReadWrite = IsReadWrite(formattedID);
-                    cout << "Is read write : " << isReadWrite << endl;
+                    //cout << "Is read write : " << isReadWrite << endl;
                     if (isReadWrite) buffer.push_back(dev);
                     else HandleUSB(dev, nullptr);
                 }
                 else {
-                    cout << "\n";
+                    //cout << "\n";
                 }
 
                 break;
@@ -1418,7 +1408,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
             case DBT_DEVICEQUERYREMOVE:
                 // Check if the ejection request is specifically for our registered Handle
                 if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_HANDLE) {
-                    cout << "[*] Ejection requested by user!" << endl;
+                    //cout << "[*] Ejection requested by user!" << endl;
                     g_keepWatching = false;
 
                     // Unregister the handle notification
@@ -1432,18 +1422,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
                         CancelIoEx(g_hUSBDir, NULL);
                         CloseHandle(g_hUSBDir);
                         g_hUSBDir = INVALID_HANDLE_VALUE;
-                        cout << "[*] Released USB handle to allow ejection." << endl;
+                        //cout << "[*] Released USB handle to allow ejection." << endl;
                     }
                 }
                 return TRUE; // ALWAYS return TRUE to grant the ejection
 
             case DBT_DEVICEREMOVECOMPLETE: //USB physically yanked out
-                cout << "[-] A device was removed! ";
+                //cout << "[-] A device was removed! ";
                 if (lpHdr && lpHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
-                    cout << "(USB Interface Disconnected)\n";
+                    //cout << "(USB Interface Disconnected)\n";
                 }
                 else {
-                    cout << "\n";
+                    //cout << "\n";
                 }
 
                 g_keepWatching = false;
@@ -1467,7 +1457,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) { //
 int main() {
     string inputBuffer;
 
-    cout << "Boot Mode : \n1 - Register USB \n2 - CheckUSB \n3 - USB Scanning" << endl;
+    cout << "Boot Mode : \n1 - Register USB \n2 - Check USB \n3 - USB Scanning" << endl;
     cout << "Chosen boot mode : ";
     cin >> inputBuffer;
     if (stoi(inputBuffer) == 1) {
@@ -1596,7 +1586,7 @@ int main() {
             pos = policy.find(replace, pos + replacer.size());
         }
 
-        cout << "Policy : " << policy << endl;
+        //cout << "Policy : " << policy << endl;
 
         vector<string> policyVector = {};
 

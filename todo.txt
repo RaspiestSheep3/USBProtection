@@ -13,10 +13,10 @@
     - Use SHA instead of MD5 - DONE
     - Reject empty .sig file - DONE
     - Increase read directory buffer size - 8x - DONE
-- Clean up output
-- Do final checks and tests
+- Clean up output - DONE
+- Do final checks and tests - DONE
 
-- Note - this project assumes the main system is safe - MENTION IN README
+- Note - this project assumes the main system is safe
 - Note - "UNKNOWN" as the Owner is reserved for actually unknown names
 - Note - we cant trust the USB for the owners public key for key verification
     - This must be sent out of channel
