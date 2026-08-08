@@ -7,14 +7,14 @@
     - Build a system to check for inconsistencies - DONE
     - In discontinuity checker do another scan and measure against last log - DONE
 - Make a way to be able to take out the USB without having to close the program - DONE
-- In mode 1 initialise the log
-- In mode 2 ignore strangeness within the log file
+- In mode 1 initialise the log - DONE
+- In mode 2 ignore strangeness within the log file - DONE
 - Minor improvements - DONE
     - Use SHA instead of MD5 - DONE
     - Reject empty .sig file - DONE
     - Increase read directory buffer size - 8x - DONE
 - Clean up output
-- Do final checks
+- Do final checks and tests
 
 - Note - this project assumes the main system is safe - MENTION IN README
 - Note - "UNKNOWN" as the Owner is reserved for actually unknown names

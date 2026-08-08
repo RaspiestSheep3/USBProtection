@@ -231,12 +231,12 @@ vector<unsigned char> HexToBytes(const string& hexStr) {
     return bytes;
 }
 
-void SHA256FromFile(const string &filePath, unsigned char* out) {
+string SHA256FromFile(const string &filePath) {
     ifstream file(filePath, ios::in | ios::binary | ios::ate);
 
     if (!file.is_open()) {
         cerr << "Error: Cannot open file: " << filePath << endl;
-        return;
+        return "NULL";
     }
 
     // Get file size
@@ -252,12 +252,11 @@ void SHA256FromFile(const string &filePath, unsigned char* out) {
     file.close();
 
     // Compute the SHA hash of the file content
-    string hash = sha256(string(memBlock));
+    string hash = sha256(string(memBlock, fileSize));
 
-    out = (unsigned char*) hash.c_str();
-    
-    // Clean up
     delete[] memBlock;
+
+    return hash;
 }
 
 string ProcessSHA256(unsigned char* md, long size = SHA256_DIGEST_LENGTH) {
@@ -653,10 +652,7 @@ void WatchUSB(string driveLetter) {
             else if (filesystem::is_regular_file(entry.path())) {
                 cout << "File : " << entry.path() << endl;
                 
-                unsigned char out[SHA256_DIGEST_LENGTH];
-
-                SHA256FromFile((entry.path()).string(), out);
-                string sha = BytesToHex(out, SHA256_DIGEST_LENGTH);
+                string sha = SHA256FromFile((entry.path()).string());
 
                 USBFile usb{
                     (entry.path()).string(),
@@ -723,9 +719,7 @@ void WatchUSB(string driveLetter) {
                     unencryptedBaseEntry = '?' + fileName + "? was created | Action Type 1";
                     entry.name = fileName;
 
-                    unsigned char out[SHA256_DIGEST_LENGTH];
-                    SHA256FromFile(fileName, out);
-                    string newSHA = BytesToHex(out, SHA256_DIGEST_LENGTH);
+                    string newSHA = SHA256FromFile(fileName);
                     entry.fileHash = newSHA;
                     
                     usbFiles[fileName] = entry;
@@ -740,9 +734,7 @@ void WatchUSB(string driveLetter) {
                     string oldHash = entry.fileHash;
 
                     uint64_t newSize = filesystem::file_size(fileName);
-                    unsigned char out[SHA256_DIGEST_LENGTH];
-                    SHA256FromFile(fileName, out);
-                    string newSHA = BytesToHex(out, SHA256_DIGEST_LENGTH);
+                    string newSHA = SHA256FromFile(fileName);
 
                     entry.fileHash = newSHA;
                     entry.fileSize = newSize;
@@ -1059,6 +1051,58 @@ void GenerateSignature(RSA*& keypair, string* signatureInfo, string folderPath) 
     FILE* publicKeyFile = fopen((folderPath + "/public.pem").c_str(), "w");
     PEM_write_RSAPublicKey(publicKeyFile, keypair);
     fclose(publicKeyFile);
+
+    //Dealing with the log so it treats the initial state properly
+    ofstream log(folderPath + "/usb.log");
+
+    //Same BFS search as used before
+    unordered_map<string, USBFile> usbFiles;
+    vector<string> pathQueue = { folderPath };
+    
+    while (pathQueue.size() > 0) {
+        string path = pathQueue[0];
+        pathQueue.erase(pathQueue.begin());
+
+        for (const auto& entry : filesystem::directory_iterator(path)) {
+            if (filesystem::is_directory(entry.path())) {
+                pathQueue.push_back((entry.path()).string());
+                //cout << "Directory : " << entry.path() << endl;
+
+            }
+            else if (filesystem::is_regular_file(entry.path())) {
+                if (entry.path() == folderPath + "/usb.log") continue;
+
+                cout << "File : " << entry.path() << endl;
+
+                string sha = SHA256FromFile((entry.path()).string());
+
+                USBFile usb{
+                    (entry.path()).string(),
+                    filesystem::file_size(entry.path()),
+                    sha
+                };
+
+                usbFiles[usb.name] = usb;
+
+            }
+            else cout << "Other? : " << entry.path() << endl;
+        }
+    }
+
+    for (auto pair : usbFiles) {
+        //For each file, ill first write in a creation then a modification
+        WriteEncryptedLogEntry(
+            '?' + pair.first + "? was created | Action Type 1", 
+            folderPath
+        );
+        WriteEncryptedLogEntry(
+            //Using the blank hash
+            "?" + pair.first + "? was modified (old hash = ?e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855?, old size = ?0?B, new hash = ?" + pair.second.fileHash + "?, new size = ?" + to_string(pair.second.fileSize) + "?B) | Action Type 3",
+            folderPath
+        );
+    }
+
+    log.close();
 }
 
 string FormatTime(string raw) {
@@ -1154,7 +1198,7 @@ void SearchForDiscontinuities(vector<string> log, string driveLetter) {
                     timestamp,
                     2
                 );
-                if (file.fileSize != stoi(keyEntries[2])) WarnAboutDiscontinuity(
+                if (file.fileSize != stoull(keyEntries[2])) WarnAboutDiscontinuity(
                     keyEntries[0] + " has the wrong size - it should have " + to_string(file.fileSize) + " but has " + keyEntries[2],
                     timestamp,
                     2
@@ -1183,7 +1227,7 @@ void SearchForDiscontinuities(vector<string> log, string driveLetter) {
                     timestamp,
                     3
                 );
-                if (file.fileSize != stoi(keyEntries[2])) WarnAboutDiscontinuity(
+                if (file.fileSize != stoull(keyEntries[2])) WarnAboutDiscontinuity(
                     keyEntries[0] + " has the wrong size - it should have " + to_string(file.fileSize) + " but has " + keyEntries[2],
                     timestamp,
                     3
@@ -1191,8 +1235,8 @@ void SearchForDiscontinuities(vector<string> log, string driveLetter) {
 
                 file = {
                     keyEntries[0],
-                    file.fileSize,
-                    file.fileHash,
+                    stoull(keyEntries[4]),
+                    keyEntries[3]
                 };
                 files[keyEntries[0]] = file;
             }
@@ -1258,10 +1302,7 @@ void SearchForDiscontinuities(vector<string> log, string driveLetter) {
             else if (filesystem::is_regular_file(entry.path())) {
                 cout << "File : " << entry.path() << endl;
 
-                unsigned char out[SHA256_DIGEST_LENGTH];
-
-                SHA256FromFile((entry.path()).string(), out);
-                string sha = BytesToHex(out, SHA256_DIGEST_LENGTH);
+                string sha = SHA256FromFile((entry.path()).string());
 
                 USBFile usb{
                     (entry.path()).string(),
@@ -1281,6 +1322,8 @@ void SearchForDiscontinuities(vector<string> log, string driveLetter) {
     vector<string> processedEntries = {};
     for (auto pair : files) {
         processedEntries.push_back(pair.first);
+
+        if (pair.first == (driveLetter + "usb.log")) continue;
 
         if (usbFiles.count(pair.first) == 0) WarnAboutDiscontinuity(
             pair.first + " exists in the logs but not on the USB now",
@@ -1310,6 +1353,8 @@ void SearchForDiscontinuities(vector<string> log, string driveLetter) {
 
     //Making sure we've dealth with everything
     for (auto pair : usbFiles) {
+        if (pair.first == (driveLetter + "usb.log")) continue;
+
         if (find(processedEntries.begin(), processedEntries.end(), pair.first) == processedEntries.end()) WarnAboutDiscontinuity(
             pair.first + " should not currently exist according to the logs but does on the USB now",
             "",
